@@ -1,0 +1,55 @@
+---
+# LifeTap 2 CI — everything runs in Docker containers (same images work locally):
+#   docker run --rm -v $PWD:/app -w /app ghcr.io/cirruslabs/flutter:3.44.0 flutter test
+
+image: ghcr.io/cirruslabs/flutter:3.44.0
+
+stages:
+  - lint
+  - test
+  - integration
+
+variables:
+  PUB_CACHE: "$CI_PROJECT_DIR/.pub-cache"
+
+cache:
+  key: pub-$CI_COMMIT_REF_SLUG
+  paths:
+    - .pub-cache/
+
+before_script:
+  - flutter pub get
+
+format:
+  stage: lint
+  script:
+    - dart format --set-exit-if-changed lib test integration_test
+
+analyze:
+  stage: lint
+  script:
+    - flutter analyze --no-fatal-infos
+
+unit-and-widget:
+  stage: test
+  script:
+    - flutter test --coverage --machine > test-report.jsonl || FAILED=1
+    - dart run tool/junit_report.dart test-report.jsonl junit.xml || true
+    - test -z "$FAILED"
+  coverage: '/lines\.*: \d+\.\d+%/'
+  artifacts:
+    when: always
+    reports:
+      junit: junit.xml
+    paths:
+      - coverage/lcov.info
+
+integration-linux:
+  stage: integration
+  script:
+    - apt-get update -qq && apt-get install -y -qq xvfb libgtk-3-dev ninja-build clang cmake pkg-config liblzma-dev
+    - flutter config --enable-linux-desktop
+    - xvfb-run -a flutter test integration_test -d linux
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
