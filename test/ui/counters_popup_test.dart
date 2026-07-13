@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lifetap/game/game_events.dart';
 import 'package:lifetap/game/game_notifier.dart';
 import 'package:lifetap/ui/game_screen.dart';
 
@@ -96,5 +97,36 @@ void main() {
       find.text('Tap to increment. Hold for additional options.'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('a named-counter change is a first-class history row with a '
+      'signed delta chip and a result value', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: GameScreen()),
+      ),
+    );
+    await tester.pump();
+
+    container
+        .read(gameProvider.notifier)
+        .dispatch(
+          const AdjustNamedCounter(playerId: 0, name: 'Treasure', delta: 3),
+        );
+    await tester.pump();
+
+    // Open the history sheet from the toolbar.
+    await tester.tap(find.byIcon(Icons.history));
+    await tester.pumpAndSettle();
+
+    // The Treasure row carries a signed delta chip and the resulting value,
+    // exactly like a poison/life row (before the fix it fell through to the
+    // plain text-only entry with neither).
+    expect(find.text('+3'), findsOneWidget);
+    expect(find.text('→ 3'), findsOneWidget);
   });
 }

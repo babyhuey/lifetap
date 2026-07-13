@@ -189,4 +189,46 @@ void main() {
     expect(cardSize.width, lessThan(screenSize.width - 100));
     expect(cardSize.height, lessThan(screenSize.height - 100));
   });
+
+  testWidgets('rejecting an empty rename in settings re-syncs the read-only '
+      'Name field to the real name and dispatches nothing', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    // In-app keyboard defaults ON, so the Name field is read-only.
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: GameScreen()),
+      ),
+    );
+    await tester.pump();
+
+    final id = container.read(gameProvider).current.players.first.id;
+    final originalName = container.read(gameProvider).current.player(id).name;
+    final historyBefore = container.read(gameProvider).history.length;
+
+    // Open settings, then open the seat keyboard on the Name field.
+    await tester.tap(find.byKey(ValueKey('cmdr-me-$id')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('field-name')));
+    await tester.pumpAndSettle();
+
+    // Clear the prefilled name entirely, then commit the empty value.
+    for (var i = 0; i < originalName.length; i++) {
+      await tester.tap(find.byKey(const ValueKey('key-backspace')));
+      await tester.pump();
+    }
+    await tester.tap(find.byKey(const ValueKey('key-done')));
+    await tester.pumpAndSettle();
+
+    // The read-only Name field shows the actual (unchanged) name, not blank, and
+    // no rename was dispatched.
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('field-name')),
+    );
+    expect(field.controller?.text, originalName);
+    expect(container.read(gameProvider).current.player(id).name, originalName);
+    expect(container.read(gameProvider).history.length, historyBefore);
+  });
 }

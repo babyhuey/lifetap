@@ -1189,6 +1189,18 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
     if (result == null) return;
     controller.text = result;
     onSubmit(result);
+    // onSubmit may refuse or normalize the value (an empty/whitespace name isn't
+    // applied), so re-seed the read-only fields from the authoritative game
+    // state rather than the raw input — otherwise a rejected rename would leave
+    // the field showing the blank string. Skipped while a commander lookup is
+    // still resolving, where the field must keep the just-typed name until the
+    // dispatch lands (game state hasn't updated yet).
+    if (!mounted || _resolving) return;
+    final player = ref.read(gameProvider).current.player(widget.playerId);
+    setState(() {
+      _nameController.text = player.name;
+      _commanderController.text = player.commanderName ?? '';
+    });
   }
 
   @override
@@ -1208,83 +1220,91 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
         : null;
     // A centered, width-constrained rotated card (same shape as the counters
     // popup) so a side-seat (q1/q3) rotation stays a compact panel instead of a
-    // tight modal width flipping to a full-screen stretched height.
-    return Center(
-      child: RotatedBox(
-        quarterTurns: widget.quarterTurns,
-        child: Material(
-          color: Colors.transparent,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 340),
-            child: Container(
-              decoration: BoxDecoration(
-                color: _PopupColors.surface,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (inAppKeyboard)
-                    TextField(
-                      key: const ValueKey('field-name'),
-                      controller: _nameController,
-                      readOnly: true,
-                      decoration: const InputDecoration(labelText: 'Name'),
-                      onTap: () =>
-                          _editField(_nameController, 'Name', _submitName),
-                    )
-                  else
-                    TextField(
-                      key: const ValueKey('field-name'),
-                      controller: _nameController,
-                      textInputAction: TextInputAction.done,
-                      decoration: const InputDecoration(labelText: 'Name'),
-                      onSubmitted: _submitName,
-                    ),
-                  const SizedBox(height: 12),
-                  if (inAppKeyboard)
-                    TextField(
-                      key: const ValueKey('field-commander'),
-                      controller: _commanderController,
-                      readOnly: true,
-                      decoration: InputDecoration(
-                        labelText: 'Commander',
-                        suffixIcon: suffix,
+    // tight modal width flipping to a full-screen stretched height. The bottom
+    // padding lifts it above the OS keyboard so the native-field path (in-app
+    // keyboard OFF) never leaves the Commander field/swatches occluded; a no-op
+    // when the in-app keyboard is on (the inset stays 0).
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Center(
+        child: RotatedBox(
+          quarterTurns: widget.quarterTurns,
+          child: Material(
+            color: Colors.transparent,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 340),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _PopupColors.surface,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (inAppKeyboard)
+                      TextField(
+                        key: const ValueKey('field-name'),
+                        controller: _nameController,
+                        readOnly: true,
+                        decoration: const InputDecoration(labelText: 'Name'),
+                        onTap: () =>
+                            _editField(_nameController, 'Name', _submitName),
+                      )
+                    else
+                      TextField(
+                        key: const ValueKey('field-name'),
+                        controller: _nameController,
+                        textInputAction: TextInputAction.done,
+                        decoration: const InputDecoration(labelText: 'Name'),
+                        onSubmitted: _submitName,
                       ),
-                      onTap: () => _editField(
-                        _commanderController,
-                        'Commander',
-                        _submitCommander,
-                      ),
-                    )
-                  else
-                    TextField(
-                      key: const ValueKey('field-commander'),
-                      controller: _commanderController,
-                      textInputAction: TextInputAction.done,
-                      decoration: InputDecoration(
-                        labelText: 'Commander',
-                        suffixIcon: suffix,
-                      ),
-                      onSubmitted: _submitCommander,
-                    ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      for (final swatch in defaultColors)
-                        GestureDetector(
-                          onTap: () => _recolor(swatch),
-                          child: CircleAvatar(
-                            backgroundColor: Color(swatch),
-                            radius: 16,
-                          ),
+                    const SizedBox(height: 12),
+                    if (inAppKeyboard)
+                      TextField(
+                        key: const ValueKey('field-commander'),
+                        controller: _commanderController,
+                        readOnly: true,
+                        decoration: InputDecoration(
+                          labelText: 'Commander',
+                          suffixIcon: suffix,
                         ),
-                    ],
-                  ),
-                ],
+                        onTap: () => _editField(
+                          _commanderController,
+                          'Commander',
+                          _submitCommander,
+                        ),
+                      )
+                    else
+                      TextField(
+                        key: const ValueKey('field-commander'),
+                        controller: _commanderController,
+                        textInputAction: TextInputAction.done,
+                        decoration: InputDecoration(
+                          labelText: 'Commander',
+                          suffixIcon: suffix,
+                        ),
+                        onSubmitted: _submitCommander,
+                      ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        for (final swatch in defaultColors)
+                          GestureDetector(
+                            onTap: () => _recolor(swatch),
+                            child: CircleAvatar(
+                              backgroundColor: Color(swatch),
+                              radius: 16,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -2324,6 +2344,17 @@ class _HistoryEntry {
         text: p.name,
       );
     }
+    if (event is AdjustNamedCounter) {
+      final p = after.player(event.playerId);
+      return _HistoryEntry(
+        color: Color(p.color),
+        icon: _namedCounterIcon(event.name),
+        delta: event.delta,
+        result: p.counters[event.name] ?? 0,
+        kind: _DeltaKind.counter,
+        text: p.name,
+      );
+    }
     // Rename/recolor/set-commander carry a player color dot; NewGame is neutral.
     final playerId = switch (event) {
       RenamePlayer(:final playerId) => playerId,
@@ -2343,6 +2374,15 @@ class _HistoryEntry {
     CounterMode.energy => Icons.bolt,
     CounterMode.experience => Icons.auto_awesome,
   };
+
+  /// The icon for a generic named counter, matching the counters popup's tile
+  /// icon for known types (Treasure/Storm/Rad) with a neutral fallback.
+  static IconData _namedCounterIcon(String name) {
+    for (final type in _genericCounterTypes) {
+      if (type.label == name) return type.icon;
+    }
+    return Icons.casino;
+  }
 }
 
 class _HistoryTile extends StatelessWidget {
