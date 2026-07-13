@@ -13,7 +13,11 @@ const List<int> startingLifeOptions = [20, 25, 30, 40, 60];
 /// so toggling one never rewrites game history or resets the current match.
 @immutable
 class GameSettings {
-  const GameSettings({this.commanderDamageLifeLoss = true, this.autoKo = true});
+  const GameSettings({
+    this.commanderDamageLifeLoss = true,
+    this.autoKo = true,
+    this.inAppKeyboard = true,
+  });
 
   /// When true, commander damage also subtracts life (the default rule).
   final bool commanderDamageLifeLoss;
@@ -21,12 +25,20 @@ class GameSettings {
   /// When true, a player who has hit a lethal threshold is shown knocked out.
   final bool autoKo;
 
-  GameSettings copyWith({bool? commanderDamageLifeLoss, bool? autoKo}) =>
-      GameSettings(
-        commanderDamageLifeLoss:
-            commanderDamageLifeLoss ?? this.commanderDamageLifeLoss,
-        autoKo: autoKo ?? this.autoKo,
-      );
+  /// When true, the rename editor uses a small seat-rotated on-screen keyboard
+  /// instead of the OS keyboard (which the OS can't rotate to face a side seat).
+  final bool inAppKeyboard;
+
+  GameSettings copyWith({
+    bool? commanderDamageLifeLoss,
+    bool? autoKo,
+    bool? inAppKeyboard,
+  }) => GameSettings(
+    commanderDamageLifeLoss:
+        commanderDamageLifeLoss ?? this.commanderDamageLifeLoss,
+    autoKo: autoKo ?? this.autoKo,
+    inAppKeyboard: inAppKeyboard ?? this.inAppKeyboard,
+  );
 }
 
 class SettingsNotifier extends Notifier<GameSettings> {
@@ -37,6 +49,9 @@ class SettingsNotifier extends Notifier<GameSettings> {
       state = state.copyWith(commanderDamageLifeLoss: value);
 
   void setAutoKo(bool value) => state = state.copyWith(autoKo: value);
+
+  void setInAppKeyboard(bool value) =>
+      state = state.copyWith(inAppKeyboard: value);
 }
 
 final settingsProvider = NotifierProvider<SettingsNotifier, GameSettings>(
@@ -124,6 +139,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onChanged: ref
                   .read(settingsProvider.notifier)
                   .setCommanderDamageLifeLoss,
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'In-app keyboard',
+                style: TextStyle(
+                  color: LifeTapColors.textPrimary,
+                  fontSize: 15,
+                ),
+              ),
+              subtitle: const Text(
+                'Type names with a keyboard that faces your seat (side seats). '
+                "Off = your device's keyboard.",
+                style: TextStyle(
+                  color: LifeTapColors.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+              value: settings.inAppKeyboard,
+              onChanged: ref.read(settingsProvider.notifier).setInAppKeyboard,
+              activeTrackColor: LifeTapColors.accent,
+              activeThumbColor: Colors.black,
             ),
             _ToggleRow(
               label: 'Auto-KO',

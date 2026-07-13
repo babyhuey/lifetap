@@ -413,10 +413,14 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   /// rotated field stays visible for every seat rotation.
   Future<void> _editName(int playerId, int quarterTurns) async {
     final current = ref.read(gameProvider).current.player(playerId).name;
+    final inAppKeyboard = ref.read(settingsProvider).inAppKeyboard;
     final name = await showDialog<String>(
       context: context,
-      builder: (context) =>
-          _NameEditDialog(initialName: current, quarterTurns: quarterTurns),
+      builder: (context) => _NameEditDialog(
+        initialName: current,
+        quarterTurns: quarterTurns,
+        inAppKeyboard: inAppKeyboard,
+      ),
     );
     if (name == null) return; // cancelled or dismissed by an outside tap
     final trimmed = name.trim();
@@ -1225,21 +1229,31 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
 /// Seat-rotated rename editor. The live name preview, the field, and the
 /// Cancel/Done buttons are wrapped in a [RotatedBox] of the player's seat
 /// [quarterTurns] so the whole editing surface faces that seat — the same way
-/// their life number does. The system keyboard itself stays upright (an OS
-/// constraint we don't fight); instead the panel is pinned to the top and
-/// lifted above the keyboard inset, and a [FittedBox] scales the (possibly
-/// sideways) panel down to whatever room is left, so the field stays visible
-/// and reachable for all four seat rotations. Autofocused and prefilled with
-/// the current name; Done/submit pops the new name, an outside tap or Cancel
-/// pops null and leaves the name unchanged.
+/// their life number does.
+///
+/// Two input modes, chosen by [inAppKeyboard]:
+///  * `false` — the native path: an autofocused [TextField] with the OS
+///    keyboard. The keyboard itself stays upright (an OS constraint we don't
+///    fight); the panel is pinned to the top and lifted above the keyboard
+///    inset, and a [FittedBox] scales the (possibly sideways) panel down to
+///    whatever room is left.
+///  * `true` (default) — a small [_InAppKeyboard] rendered inside the same
+///    [RotatedBox], so the keys face the seat too. There is no editable field
+///    (an on-screen field would summon the OS keyboard), just a bordered
+///    display box with a caret. With no OS keyboard the panel is centered.
+///
+/// Prefilled with the current name; Done/submit (or the keyboard's return key)
+/// pops the new name, an outside tap or Cancel pops null and leaves it unchanged.
 class _NameEditDialog extends StatefulWidget {
   const _NameEditDialog({
     required this.initialName,
     required this.quarterTurns,
+    required this.inAppKeyboard,
   });
 
   final String initialName;
   final int quarterTurns;
+  final bool inAppKeyboard;
 
   @override
   State<_NameEditDialog> createState() => _NameEditDialogState();
@@ -1250,6 +1264,10 @@ class _NameEditDialogState extends State<_NameEditDialog> {
     text: widget.initialName,
   );
 
+  // Shift starts on so the first typed letter is capitalized; each letter key
+  // auto-unshifts. Only used by the in-app keyboard path.
+  bool _shifted = true;
+
   @override
   void dispose() {
     _controller.dispose();
@@ -1258,9 +1276,56 @@ class _NameEditDialogState extends State<_NameEditDialog> {
 
   void _submit() => Navigator.of(context).pop(_controller.text);
 
+  // In-app keyboard edits: names are short, so we only ever append/remove at the
+  // end — no mid-string cursor. The controller is the store, so both the preview
+  // and the display box (ValueListenableBuilders) update for free.
+  void _onKey(String ch) {
+    _controller.text = _controller.text + (_shifted ? ch.toUpperCase() : ch);
+    if (_shifted) setState(() => _shifted = false);
+  }
+
+  void _onBackspace() {
+    final text = _controller.text;
+    if (text.isNotEmpty) {
+      _controller.text = text.substring(0, text.length - 1);
+    }
+  }
+
+  void _onSpace() => _controller.text = '${_controller.text} ';
+
+  void _onShift() => setState(() => _shifted = !_shifted);
+
   @override
   Widget build(BuildContext context) {
-    // The keyboard rises from the bottom; drop its height from the usable area
+    if (widget.inAppKeyboard) {
+      // No OS keyboard rises in this mode, so there is no inset to dodge: center
+      // the rotated panel (preview + field + keys) so it faces the seat, and let
+      // the FittedBox shrink it to fit tall side-seat (q1/q3) rotations.
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          return Align(
+            alignment: Alignment.center,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: constraints.maxWidth - 32,
+                  maxHeight: constraints.maxHeight - 32,
+                ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: RotatedBox(
+                    quarterTurns: widget.quarterTurns,
+                    child: SizedBox(width: 320, child: _inAppPanel()),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    }
+    // The OS keyboard rises from the bottom; drop its height from the usable area
     // and keep the panel at the top so the rotated field is never occluded. The
     // FittedBox then scales the panel down to fit whatever height is left, which
     // matters most for the side seats (q1/q3) whose rotated panel is tallest.
@@ -1289,6 +1354,94 @@ class _NameEditDialogState extends State<_NameEditDialog> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// The in-app-keyboard panel: live preview, a non-editable display box with a
+  /// caret (so no OS keyboard is summoned), the on-screen keys, and Cancel/Done.
+  Widget _inAppPanel() {
+    return Material(
+      color: LifeTapColors.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _controller,
+              builder: (context, value, _) {
+                final preview = value.text.trim();
+                return Text(
+                  preview.isEmpty ? 'Player name' : preview,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: LifeTapColors.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            // Bordered display box styled like an input, showing the text with a
+            // trailing caret. Not editable, so tapping it never opens the OS
+            // keyboard — the on-screen keys below are the only way to type.
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _controller,
+              builder: (context, value, _) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: LifeTapColors.chip,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: LifeTapColors.divider),
+                  ),
+                  child: Text(
+                    '${value.text}|',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: LifeTapColors.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            _InAppKeyboard(
+              shifted: _shifted,
+              onKey: _onKey,
+              onBackspace: _onBackspace,
+              onSpace: _onSpace,
+              onShift: _onShift,
+              onDone: _submit,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(onPressed: _submit, child: const Text('Done')),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1344,6 +1497,187 @@ class _NameEditDialogState extends State<_NameEditDialog> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A compact on-screen QWERTY sized to match the ~320px rename panel, styled
+/// with the app's dark tokens. It owns no text of its own — each key just fires
+/// a callback so the parent dialog keeps the text. Letters render uppercase
+/// while [shifted]. Deliberately minimal: no long-press, no numbers row, no
+/// cursor movement (names are short). Placed inside the panel's [RotatedBox] so
+/// the keys face the seat, which the OS keyboard can't do.
+class _InAppKeyboard extends StatelessWidget {
+  const _InAppKeyboard({
+    required this.shifted,
+    required this.onKey,
+    required this.onBackspace,
+    required this.onSpace,
+    required this.onShift,
+    required this.onDone,
+  });
+
+  final bool shifted;
+  final ValueChanged<String> onKey;
+  final VoidCallback onBackspace;
+  final VoidCallback onSpace;
+  final VoidCallback onShift;
+  final VoidCallback onDone;
+
+  static const List<String> _row1 = [
+    'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', //
+  ];
+  static const List<String> _row2 = [
+    'a',
+    's',
+    'd',
+    'f',
+    'g',
+    'h',
+    'j',
+    'k',
+    'l',
+  ];
+  static const List<String> _row3 = ['z', 'x', 'c', 'v', 'b', 'n', 'm'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _letterRow(_row1),
+        const SizedBox(height: 6),
+        _letterRow(_row2),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: _KeyCap(
+                onTap: onShift,
+                highlighted: shifted,
+                child: const Icon(
+                  Icons.arrow_upward,
+                  size: 18,
+                  color: LifeTapColors.textPrimary,
+                ),
+              ),
+            ),
+            for (final ch in _row3) ...[
+              const SizedBox(width: 6),
+              Expanded(child: _letterKey(ch)),
+            ],
+            const SizedBox(width: 6),
+            Expanded(
+              flex: 3,
+              child: _KeyCap(
+                key: const ValueKey('key-backspace'),
+                onTap: onBackspace,
+                child: const Icon(
+                  Icons.backspace_outlined,
+                  size: 18,
+                  color: LifeTapColors.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              flex: 6,
+              child: _KeyCap(
+                key: const ValueKey('key-space'),
+                onTap: onSpace,
+                child: const Text(
+                  'space',
+                  style: TextStyle(
+                    color: LifeTapColors.textPrimary,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              flex: 3,
+              child: _KeyCap(
+                key: const ValueKey('key-done'),
+                onTap: onDone,
+                highlighted: true,
+                child: const Icon(
+                  Icons.check,
+                  size: 18,
+                  color: LifeTapColors.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _letterRow(List<String> letters) {
+    return Row(
+      children: [
+        for (var i = 0; i < letters.length; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
+          Expanded(child: _letterKey(letters[i])),
+        ],
+      ],
+    );
+  }
+
+  Widget _letterKey(String ch) {
+    return _KeyCap(
+      key: ValueKey('key-$ch'),
+      onTap: () => onKey(ch),
+      child: Text(
+        shifted ? ch.toUpperCase() : ch,
+        style: const TextStyle(
+          color: LifeTapColors.textPrimary,
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+/// One key of the [_InAppKeyboard]: a rounded chip with a divider border that
+/// runs its [onTap] when pressed. [highlighted] (shift-on, the return key) uses
+/// the lighter unselected-chip fill so it reads as active.
+class _KeyCap extends StatelessWidget {
+  const _KeyCap({
+    super.key,
+    required this.child,
+    required this.onTap,
+    this.highlighted = false,
+  });
+
+  final Widget child;
+  final VoidCallback onTap;
+  final bool highlighted;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        height: 40,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: highlighted
+              ? LifeTapColors.chipUnselected
+              : LifeTapColors.chip,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: LifeTapColors.divider),
+        ),
+        child: child,
       ),
     );
   }
