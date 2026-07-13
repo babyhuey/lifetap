@@ -107,8 +107,9 @@ void main() {
     );
     await tester.pump();
 
-    // Default 4-player game: player 0's grid holds its own "me" identity cell
-    // plus one cell per opponent (ascending id), all present as hit targets.
+    // Default 4-player game: player 0's grid is a seating mini-map with one cell
+    // per player in seat order — player 0's own "me" cell plus one cell per
+    // opponent — all present as hit targets regardless of their grid position.
     expect(find.byKey(const ValueKey('cmdr-me-0')), findsOneWidget);
     expect(find.byKey(const ValueKey('cmdr-0-1')), findsOneWidget);
     expect(find.byKey(const ValueKey('cmdr-0-2')), findsOneWidget);

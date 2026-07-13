@@ -301,51 +301,53 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 
   /// The compact commander-damage grid for the player at [index]: a 2-column
-  /// [Wrap] whose first cell is that player's own "me" identity holder and the
-  /// rest are one cell per opponent in ascending id order. The caller places
-  /// this grid inside the seat's [RotatedBox] at the bottom-right corner, so
-  /// each cell passes `quarterTurns: 0` (no double rotation) and the grid faces
-  /// the player in their own corner. Opponent cells increment/decrement that
-  /// opponent's commander damage; the "me" cell opens the player's settings.
+  /// [Wrap] holding one cell per player in seat (player-index) order, so the
+  /// grid reads as a mini-map of the table — for 4 players the cells fill a 2×2
+  /// that mirrors the `[top-left, top-right, bottom-left, bottom-right]` zone
+  /// layout, landing each player's tile in their own seat position. The current
+  /// player's own cell is their "me" identity holder (own art/color, "me"
+  /// label, opens their settings); every other cell is that opponent's tile
+  /// (their art/color plus this player's commander damage from them). The caller
+  /// places this grid inside the seat's [RotatedBox] at the bottom-right corner,
+  /// so each cell passes `quarterTurns: 0` (no double rotation) and the whole
+  /// mini-map faces the player in their own corner.
   Widget _commanderDamageGrid(
     List<PlayerState> players,
     int index,
     List<int> turns,
   ) {
     final me = players[index];
-    final opponents = [
-      for (final p in players)
-        if (p.id != me.id) p,
-    ]..sort((a, b) => a.id.compareTo(b.id));
     return SizedBox(
       width: 2 * _cmdrCellSize + _cmdrCellGap,
       child: Wrap(
         spacing: _cmdrCellGap,
         runSpacing: _cmdrCellGap,
         children: [
-          _CommanderDamageSquare(
-            key: ValueKey('cmdr-me-${me.id}'),
-            size: _cmdrCellSize,
-            quarterTurns: 0,
-            color: Color(me.color),
-            artUrl: me.artUrl,
-            label: 'me',
-            onTap: () => _showPlayerSettings(me.id, turns[index]),
-            onDecrement: null,
-          ),
-          for (final opp in opponents)
-            _CommanderDamageSquare(
-              key: ValueKey('cmdr-${me.id}-${opp.id}'),
-              size: _cmdrCellSize,
-              quarterTurns: 0,
-              color: Color(opp.color),
-              artUrl: opp.artUrl,
-              value: me.commanderDamage[opp.id] ?? 0,
-              onTap: () => _adjustCommanderDamage(me.id, opp.id, 1),
-              onDecrement: (me.commanderDamage[opp.id] ?? 0) > 0
-                  ? () => _adjustCommanderDamage(me.id, opp.id, -1)
-                  : null,
-            ),
+          for (final p in players)
+            if (p.id == me.id)
+              _CommanderDamageSquare(
+                key: ValueKey('cmdr-me-${me.id}'),
+                size: _cmdrCellSize,
+                quarterTurns: 0,
+                color: Color(me.color),
+                artUrl: me.artUrl,
+                label: 'me',
+                onTap: () => _showPlayerSettings(me.id, turns[index]),
+                onDecrement: null,
+              )
+            else
+              _CommanderDamageSquare(
+                key: ValueKey('cmdr-${me.id}-${p.id}'),
+                size: _cmdrCellSize,
+                quarterTurns: 0,
+                color: Color(p.color),
+                artUrl: p.artUrl,
+                value: me.commanderDamage[p.id] ?? 0,
+                onTap: () => _adjustCommanderDamage(me.id, p.id, 1),
+                onDecrement: (me.commanderDamage[p.id] ?? 0) > 0
+                    ? () => _adjustCommanderDamage(me.id, p.id, -1)
+                    : null,
+              ),
         ],
       ),
     );
