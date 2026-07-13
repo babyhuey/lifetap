@@ -1,0 +1,90 @@
+name: Sideload builds
+
+# Builds an installable Android APK and an unsigned iOS IPA on every push to
+# main (and on demand), then publishes them to a rolling "latest" pre-release so
+# they can be downloaded straight onto a phone/tablet.
+#   - Android: install the .apk directly (enable "install unknown apps").
+#   - iOS: the .ipa is UNSIGNED — install it with AltStore or Sideloadly, which
+#     re-sign it with your free Apple ID (good for 7 days per signing). A signed,
+#     device-installable IPA would need a paid Apple Developer account + a
+#     provisioning profile.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: sideload
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    container: ghcr.io/cirruslabs/flutter:3.44.0
+    steps:
+      - uses: actions/checkout@v4
+      - run: git config --global --add safe.directory '*'
+      - run: flutter pub get
+      - name: Build release APK
+        # Signed with the debug key (android/app/build.gradle.kts), which is
+        # enough to sideload — it just can't go on the Play Store as-is.
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lifetap-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.0
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Build unsigned iOS app
+        run: flutter build ios --release --no-codesign
+      - name: Package unsigned IPA
+        # Wrap the built Runner.app in a Payload/ folder and zip it — the .ipa
+        # layout AltStore / Sideloadly expect.
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/Runner.app
+          zip -qr lifetap-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lifetap-ipa
+          path: build/ios/iphoneos/lifetap-unsigned.ipa
+          if-no-files-found: error
+
+  release:
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish rolling "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest sideload builds
+          prerelease: true
+          body: |
+            Auto-built from `main` (${{ github.sha }}).
+
+            - **Android** — download `app-release.apk` and open it on the device
+              (enable "install unknown apps" for your browser/files app).
+            - **iOS** — download `lifetap-unsigned.ipa` and install it with
+              [AltStore](https://altstore.io) or
+              [Sideloadly](https://sideloadly.io); they re-sign it with your free
+              Apple ID (reinstall every 7 days).
+          files: |
+            artifacts/**/app-release.apk
+            artifacts/**/lifetap-unsigned.ipa
