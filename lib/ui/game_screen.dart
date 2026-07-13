@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -516,14 +517,14 @@ class _PlayerZone extends ConsumerWidget {
 
     Widget? artLayer;
     if (art != null) {
-      // Falls back to the solid color while loading or on any error, so a
+      // Cached to disk on first load so the art shows offline afterwards; falls
+      // back to the solid color while loading or on any error, so a
       // missing/broken image never leaves the zone blank.
-      artLayer = Image.network(
-        art,
+      artLayer = CachedNetworkImage(
+        imageUrl: art,
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stack) => ColoredBox(color: solid),
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : ColoredBox(color: solid),
+        placeholder: (context, url) => ColoredBox(color: solid),
+        errorWidget: (context, url, error) => ColoredBox(color: solid),
       );
       // Knocked out: drain the art's color so the zone reads as out.
       if (ko) {
@@ -903,12 +904,11 @@ class _CommanderDamageSquare extends StatelessWidget {
     // Art when available, the pictured player's color otherwise — the fallback
     // also covers the loading and error states so a cell is never blank.
     final Widget fill = art != null
-        ? Image.network(
-            art,
+        ? CachedNetworkImage(
+            imageUrl: art,
             fit: BoxFit.cover,
-            errorBuilder: (context, error, stack) => ColoredBox(color: color),
-            loadingBuilder: (context, child, progress) =>
-                progress == null ? child : ColoredBox(color: color),
+            placeholder: (context, url) => ColoredBox(color: color),
+            errorWidget: (context, url, error) => ColoredBox(color: color),
           )
         : ColoredBox(color: color);
     return GestureDetector(

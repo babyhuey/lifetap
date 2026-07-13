@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Resolves a commander card name to an image URL used as a zone background.
 abstract class CommanderArtSource {
@@ -11,13 +12,31 @@ abstract class CommanderArtSource {
 /// Looks art up via Scryfall's fuzzy named-card endpoint. Returns null (never
 /// throws) on any failure — non-200, missing image, malformed JSON, or a
 /// network error — so the UI can fall back to the player's solid color.
+///
+/// Resolved URLs are cached in [SharedPreferences] keyed by the normalized
+/// commander name. Commander art URLs are stable, so a name seen once resolves
+/// instantly on later lookups and keeps working with no network.
 class ScryfallArtSource implements CommanderArtSource {
   ScryfallArtSource({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
 
+  /// SharedPreferences key prefix for cached name→URL entries.
+  static const _cachePrefix = 'cmdrart:';
+
   @override
   Future<String?> artUrl(String commanderName) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = '$_cachePrefix${commanderName.trim().toLowerCase()}';
+    final cached = prefs.getString(key);
+    if (cached != null) return cached;
+
+    final url = await _fetch(commanderName);
+    if (url != null) await prefs.setString(key, url);
+    return url;
+  }
+
+  Future<String?> _fetch(String commanderName) async {
     final uri = Uri.https('api.scryfall.com', '/cards/named', {
       'fuzzy': commanderName,
     });
