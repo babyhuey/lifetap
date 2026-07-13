@@ -10,9 +10,10 @@ sealed class PointerResult {
   final int zoneId;
 }
 
-/// A tap in [zoneId]. [magnitude] is signed: positive for a top-half tap,
-/// negative for a bottom-half tap. Its size encodes the multi-finger count
-/// (1 finger = 1, 2 = 5, 3+ = 10).
+/// A tap in [zoneId]. [magnitude] is signed: negative for a tap in the left
+/// half of the zone, positive for the right half. Its size encodes the
+/// multi-finger count (1 finger = 1, 2 = 5, 3+ = 10). Hold auto-repeats reuse
+/// this result, carrying the accelerating step as the (signed) magnitude.
 class TapResult extends PointerResult {
   const TapResult(super.zoneId, this.magnitude);
 
@@ -33,12 +34,25 @@ class ScrubResult extends PointerResult {
 }
 
 class _ActivePointer {
-  _ActivePointer({required this.zone, required this.downPos})
-    : lastPos = downPos;
+  _ActivePointer({
+    required this.zone,
+    required this.downPos,
+    required this.hold,
+  }) : lastPos = downPos;
 
   final int zone;
   final Offset downPos;
   Offset lastPos;
+
+  /// True once the finger has travelled beyond the slop: it is a scrub, not a
+  /// stationary hold, so it must not auto-repeat.
+  bool moved = false;
+
+  /// True once this pointer has emitted at least one hold repeat, so its up
+  /// suppresses the one-shot tap (no double count).
+  bool repeated = false;
+
+  final HoldRepeater hold;
 }
 
 /// Pure-Dart per-zone pointer state machine. A pointer belongs to the zone it
@@ -54,7 +68,13 @@ class PointerRouter {
     this.dragThreshold = 24.0,
     this.stepSize = 24.0,
     this.tapMaxHold = const Duration(milliseconds: 800),
-  }) : zones = List.of(zones);
+    this.holdThreshold = const Duration(milliseconds: 300),
+    Duration Function()? clock,
+  }) : zones = List.of(zones),
+       clock = clock ?? _monotonic;
+
+  static final Stopwatch _stopwatch = Stopwatch()..start();
+  static Duration _monotonic() => _stopwatch.elapsed;
 
   /// Zone rectangles in the same coordinate space the caller feeds positions
   /// in. Mutable so the UI can update it on layout changes.
@@ -70,6 +90,13 @@ class PointerRouter {
 
   /// A still gesture held longer than this is treated as a hold, not a tap.
   final Duration tapMaxHold;
+
+  /// A stationary finger held past this begins auto-repeating (see [tick]).
+  final Duration holdThreshold;
+
+  /// Injected monotonic time source. Tests supply a controllable clock; the UI
+  /// uses the default real one and drives [tick] from a periodic timer.
+  final Duration Function() clock;
 
   final Map<int, _ActivePointer> _active = {};
 
@@ -87,11 +114,38 @@ class PointerRouter {
   void down(int pointerId, Offset position) {
     final zone = _zoneAt(position);
     if (zone == null) return; // outside every zone — ignore
-    _active[pointerId] = _ActivePointer(zone: zone, downPos: position);
+    final hold = HoldRepeater(holdThreshold: holdThreshold)..start(clock());
+    _active[pointerId] = _ActivePointer(
+      zone: zone,
+      downPos: position,
+      hold: hold,
+    );
   }
 
   void move(int pointerId, Offset position) {
-    _active[pointerId]?.lastPos = position;
+    final p = _active[pointerId];
+    if (p == null) return;
+    p.lastPos = position;
+    // Any travel past the slop makes this a scrub gesture, not a stationary
+    // hold, so it stops qualifying for auto-repeat.
+    if ((position - p.downPos).distance > dragThreshold) p.moved = true;
+  }
+
+  /// Advances every held pointer's auto-repeat to the current [clock] time,
+  /// emitting accelerating repeats (see [HoldRepeater]) for any finger held
+  /// stationary past [holdThreshold]. The UI calls this from a periodic
+  /// timer/Ticker; tests call it after advancing the injected clock.
+  void tick() {
+    final now = clock();
+    for (final p in _active.values.toList()) {
+      if (p.moved) continue; // a scrub in progress, not a stationary hold
+      final step = p.hold.poll(now);
+      if (step == 0) continue;
+      p.repeated = true;
+      // Sign by PHYSICAL left/right of the zone rect (left = −, right = +).
+      final leftHalf = p.downPos.dx < zones[p.zone].center.dx;
+      onResult(TapResult(p.zone, leftHalf ? -step : step));
+    }
   }
 
   /// Drops a pointer without emitting (pointer cancel).
@@ -104,6 +158,10 @@ class PointerRouter {
     final p = _active.remove(pointerId);
     if (p == null) return;
     final wasConsumed = _consumed.remove(pointerId);
+
+    // A stationary hold that already auto-repeated owns this gesture: no extra
+    // one-shot tap (no double count) and no scrub on release.
+    if (p.repeated) return;
 
     // Positive when the finger moved up the screen (screen y grows downward).
     final vertical = p.downPos.dy - p.lastPos.dy;
@@ -124,11 +182,67 @@ class PointerRouter {
         .toList();
     final fingerCount = peers.length + 1;
     final magnitude = fingerCount >= 3 ? 10 : (fingerCount == 2 ? 5 : 1);
-    final topHalf = p.downPos.dy < zones[p.zone].center.dy;
-    onResult(TapResult(p.zone, topHalf ? magnitude : -magnitude));
+    // Sign by PHYSICAL left/right of the zone rect: left half −, right half +.
+    // NOTE: for seats rotated 180/90/270 the player's perceived left/right
+    // differs from physical; a separate per-seat direction fix is planned, so
+    // classification stays physical here for now.
+    final leftHalf = p.downPos.dx < zones[p.zone].center.dx;
+    onResult(TapResult(p.zone, leftHalf ? -magnitude : magnitude));
 
     // The other fingers of this tap must not each emit again.
     _consumed.addAll(peers);
+  }
+}
+
+/// Accelerating auto-repeat for a stationary held finger. Pure time
+/// accumulator with no timers of its own: [start] it when the finger goes down,
+/// then [poll] it with the current time on each UI tick. It returns the total
+/// unsigned step magnitude that came due since the last poll (0 if none); the
+/// caller applies the pointer's left/right sign.
+///
+/// Curve — each repeat consumes the next (step, gap-to-next) pair; the final
+/// pair repeats forever. The first repeat fires [holdThreshold] after the down,
+/// then steps grow and gaps shrink so a sustained hold reaches 10-per-step in
+/// ~1.6s: 1@300ms, 1@300, 1@240, 2@180, 2@120, 5@90, 5@60, then 10@60…
+class HoldRepeater {
+  HoldRepeater({this.holdThreshold = const Duration(milliseconds: 300)});
+
+  final Duration holdThreshold;
+
+  static const List<(int step, int gapMs)> _curve = [
+    (1, 300),
+    (1, 300),
+    (1, 240),
+    (2, 180),
+    (2, 120),
+    (5, 90),
+    (5, 60),
+    (10, 60),
+  ];
+
+  Duration? _nextDue;
+  int _fired = 0;
+
+  /// Arms the repeater; the first repeat comes due at [now] + [holdThreshold].
+  void start(Duration now) {
+    _nextDue = now + holdThreshold;
+    _fired = 0;
+  }
+
+  /// Returns the summed step magnitude of every repeat now due at [now],
+  /// advancing the curve. A coarse tick spanning several due points is caught
+  /// up in one call.
+  int poll(Duration now) {
+    if (_nextDue == null) return 0;
+    var total = 0;
+    while (now >= _nextDue!) {
+      final index = _fired < _curve.length ? _fired : _curve.length - 1;
+      final (step, gapMs) = _curve[index];
+      total += step;
+      _fired++;
+      _nextDue = _nextDue! + Duration(milliseconds: gapMs);
+    }
+    return total;
   }
 }
 

@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -8,10 +9,10 @@ const _zone0 = Rect.fromLTWH(0, 0, 100, 100);
 const _zone1 = Rect.fromLTWH(0, 100, 100, 100);
 const _short = Duration(milliseconds: 100);
 
-// Offsets by half within each zone.
-const _zone0Top = Offset(50, 20);
-const _zone0Bottom = Offset(50, 80);
-const _zone1Top = Offset(50, 120);
+// Offsets by horizontal half within each zone (x < 50 = left, x > 50 = right).
+const _zone0Left = Offset(20, 50);
+const _zone0Right = Offset(80, 50);
+const _zone1Right = Offset(80, 150);
 
 void main() {
   group('PointerRouter taps', () {
@@ -24,8 +25,8 @@ void main() {
 
       // Pointer A goes down in zone 0, pointer B in zone 1, then both lift —
       // fully interleaved, as two players tapping at the same instant.
-      router.down(1, _zone0Top);
-      router.down(2, _zone1Top);
+      router.down(1, _zone0Right);
+      router.down(2, _zone1Right);
       router.up(1, heldFor: _short);
       router.up(2, heldFor: _short);
 
@@ -44,7 +45,7 @@ void main() {
         onResult: results.add,
       );
 
-      router.down(1, _zone0Top);
+      router.down(1, _zone0Right);
       router.up(1, heldFor: _short);
 
       expect(results, [isA<TapResult>()]);
@@ -58,8 +59,8 @@ void main() {
         onResult: results.add,
       );
 
-      router.down(1, _zone0Top);
-      router.down(2, _zone0Top);
+      router.down(1, _zone0Right);
+      router.down(2, _zone0Right);
       router.up(1, heldFor: _short);
       router.up(2, heldFor: _short);
 
@@ -74,9 +75,9 @@ void main() {
         onResult: results.add,
       );
 
-      router.down(1, _zone0Top);
-      router.down(2, _zone0Top);
-      router.down(3, _zone0Top);
+      router.down(1, _zone0Right);
+      router.down(2, _zone0Right);
+      router.down(3, _zone0Right);
       router.up(1, heldFor: _short);
       router.up(2, heldFor: _short);
       router.up(3, heldFor: _short);
@@ -85,16 +86,16 @@ void main() {
       expect((results.single as TapResult).magnitude, 10);
     });
 
-    test('top-half tap is positive, bottom-half tap is negative', () {
+    test('right-half tap is positive, left-half tap is negative', () {
       final results = <PointerResult>[];
       final router = PointerRouter(
         zones: const [_zone0, _zone1],
         onResult: results.add,
       );
 
-      router.down(1, _zone0Top);
+      router.down(1, _zone0Right);
       router.up(1, heldFor: _short);
-      router.down(2, _zone0Bottom);
+      router.down(2, _zone0Left);
       router.up(2, heldFor: _short);
 
       expect((results[0] as TapResult).magnitude, 1);
@@ -121,6 +122,117 @@ void main() {
       expect(scrub.zoneId, 0);
       expect(scrub.steps, greaterThan(0), reason: 'dragging up increases');
     });
+  });
+
+  group('PointerRouter hold-to-accelerate', () {
+    ({PointerRouter router, List<PointerResult> results}) makeRouter(
+      Duration Function() clock,
+    ) {
+      final results = <PointerResult>[];
+      final router = PointerRouter(
+        zones: const [_zone0, _zone1],
+        clock: clock,
+        onResult: results.add,
+      );
+      return (router: router, results: results);
+    }
+
+    test('no repeat fires before the hold threshold', () {
+      var now = Duration.zero;
+      final (:router, :results) = makeRouter(() => now);
+
+      router.down(1, _zone0Right);
+      now = const Duration(milliseconds: 299);
+      router.tick();
+
+      expect(results, isEmpty);
+    });
+
+    test('held right pointer repeats positive, held left negative', () {
+      var now = Duration.zero;
+
+      final right = makeRouter(() => now);
+      right.router.down(1, _zone0Right);
+      now = const Duration(milliseconds: 300);
+      right.router.tick();
+      expect(right.results, isNotEmpty);
+      expect(
+        right.results.every((r) => (r as TapResult).magnitude > 0),
+        isTrue,
+      );
+
+      now = Duration.zero;
+      final left = makeRouter(() => now);
+      left.router.down(1, _zone0Left);
+      now = const Duration(milliseconds: 300);
+      left.router.tick();
+      expect(left.results, isNotEmpty);
+      expect(left.results.every((r) => (r as TapResult).magnitude < 0), isTrue);
+    });
+
+    test(
+      'held pointer accelerates: steps grow and cumulative change climbs',
+      () {
+        var now = Duration.zero;
+        final (:router, :results) = makeRouter(() => now);
+
+        router.down(1, _zone0Right);
+
+        // Poll on a fine cadence, as the UI's periodic ticker does, for ~2s.
+        final steps = <int>[];
+        for (var ms = 20; ms <= 2000; ms += 20) {
+          now = Duration(milliseconds: ms);
+          final before = results.length;
+          router.tick();
+          for (var i = before; i < results.length; i++) {
+            steps.add((results[i] as TapResult).magnitude);
+          }
+        }
+
+        expect(steps.every((m) => m > 0), isTrue, reason: 'right half is +');
+        expect(steps.first, 1, reason: 'first repeat is the smallest step');
+        expect(steps.reduce(max), 10, reason: 'ramps up to the ±10 ceiling');
+        expect(
+          steps.last,
+          greaterThan(steps.first),
+          reason: 'steps get bigger the longer it holds',
+        );
+        final total = steps.fold<int>(0, (a, b) => a + b);
+        expect(
+          total,
+          greaterThan(steps.first),
+          reason: 'cumulative change grows',
+        );
+      },
+    );
+
+    test('up after repeats does not add an extra tap', () {
+      var now = Duration.zero;
+      final (:router, :results) = makeRouter(() => now);
+
+      router.down(1, _zone0Right);
+      now = const Duration(milliseconds: 500);
+      router.tick();
+      final afterHold = results.length;
+      expect(afterHold, greaterThan(0));
+
+      router.up(1, heldFor: const Duration(milliseconds: 500));
+      expect(results, hasLength(afterHold), reason: 'no extra one-shot tap');
+    });
+
+    test(
+      'a quick tap released before the threshold still yields a single ±1',
+      () {
+        var now = Duration.zero;
+        final (:router, :results) = makeRouter(() => now);
+
+        router.down(1, _zone0Right);
+        router.up(1, heldFor: _short); // released, no tick in between
+
+        expect(results, [isA<TapResult>()]);
+        expect((results.single as TapResult).magnitude, 1);
+      },
+    );
   });
 
   group('RitualDetector', () {

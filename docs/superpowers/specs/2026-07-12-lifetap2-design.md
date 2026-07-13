@@ -11,6 +11,7 @@ Rebuild of the LifeTap MTG-style life counter as a Flutter app, feature-parity w
 ## Baseline feature parity
 
 - 2-player face-to-face split screen; tap to +/- life; starting-life presets 20/30/40; reset game.
+- New games default to **4 players at 20 life** (2/3/5/6 also selectable in the new-game dialog).
 - 3–6 players with adaptive zone layout (zones rotated to face each seat).
 - Commander damage per opponent (auto-applies life loss), poison/energy/experience counters.
 - Utilities: dice roll, coin flip, first-player picker, life-change history + undo, keep-screen-awake, per-player colors/names.
@@ -20,8 +21,8 @@ Rebuild of the LifeTap MTG-style life counter as a Flutter app, feature-parity w
 | Feature | Behavior |
 |---|---|
 | Simultaneous taps | Touches in different zones are fully independent — two+ players tapping at the same instant all register; nothing queued or dropped |
-| Multi-finger increments | Within a zone: 1-finger tap ±1, 2-finger tap ±5, 3-finger tap ±10 (top half +, bottom half −) |
-| Per-finger drag | Vertical drag in a zone scrubs the life value; hold = auto-repeat increment |
+| Multi-finger increments | Within a zone: 1-finger tap ±1, 2-finger tap ±5, 3-finger tap ±10. Sign is by horizontal position in the zone rect: **left half − , right half +** (was top/bottom). Sign is by *physical* left/right; per-seat rotation is a separate planned fix |
+| Per-finger drag | Vertical drag in a zone scrubs the life value. A stationary hold (movement under the scrub slop) auto-repeats after ~300ms and **accelerates** — step 1→2→5→10 while the interval shrinks ~300ms→60ms, reaching ±10-per-step in ~1.6s. A hold that repeated does not also emit a tap on release. Stationary-hold wins over scrub |
 | Hold-together ritual | ≥1 finger held in **every** active zone for 1.5s (with progress ring) = start/reset game — replaces a reset button and prevents accidents |
 | Multi-touch first-player picker | Everyone touches and holds anywhere; after the hold window a random finger wins — replaces the menu-based picker |
 

@@ -14,8 +14,8 @@ void main() {
     addTearDown(container.dispose);
   });
 
-  test('starts as a 2-player, 20-life game with a single history event', () {
-    expect(session().current.playerCount, 2);
+  test('starts as a 4-player, 20-life game with a single history event', () {
+    expect(session().current.playerCount, 4);
     expect(session().current.players, everyElement(isA<PlayerState>()));
     expect(session().current.players.map((p) => p.life), everyElement(20));
     expect(session().history, hasLength(1));
@@ -51,7 +51,7 @@ void main() {
   test('undo does nothing at the initial (single-event) history', () {
     notifier().undo();
     expect(session().history, hasLength(1));
-    expect(session().current.playerCount, 2);
+    expect(session().current.playerCount, 4);
   });
 
   test('historyLines returns one line per event in order', () {

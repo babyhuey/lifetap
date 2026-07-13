@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -26,12 +27,26 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   late final PointerRouter _router;
   final Map<int, Duration> _downAt = {};
   final Random _rng = Random();
+  Timer? _holdTimer;
 
   @override
   void initState() {
     super.initState();
     _router = PointerRouter(onResult: _onResult);
+    // Drives hold auto-repeat: while a finger is held stationary in a zone the
+    // router emits accelerating repeats on each tick. A no-op when nothing is
+    // held, so the fixed interval costs almost nothing at rest.
+    _holdTimer = Timer.periodic(
+      const Duration(milliseconds: 60),
+      (_) => _router.tick(),
+    );
     _enableWakelock();
+  }
+
+  @override
+  void dispose() {
+    _holdTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _enableWakelock() async {
@@ -522,7 +537,7 @@ class _NewGameDialog extends StatefulWidget {
 }
 
 class _NewGameDialogState extends State<_NewGameDialog> {
-  int _count = 2;
+  int _count = 4;
   int _life = 20;
 
   @override
