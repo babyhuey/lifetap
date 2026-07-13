@@ -87,23 +87,23 @@ app (it runs in a fullscreen Safari shell), but for a life counter that is usual
 
 **This is the chosen path (you don't have a Mac).** It is wired up in this repo:
 
-1. `.gitlab-ci.yml` has a `pages` job that runs `flutter build web` in the Flutter
-   container and publishes the result as a **GitLab Pages** site on every push to the
-   default branch — served at `https://<namespace>.gitlab.io/lifetap/`.
+1. `.github/workflows/deploy.yml` builds the web app with `flutter build web` in the
+   Flutter container and publishes it to **GitHub Pages** on every push to `main` —
+   served at **https://babyhuey.github.io/lifetap/**.
 2. The web target and an iPad-friendly PWA manifest (fullscreen `standalone`, landscape,
-   apple-touch-icon) are added to the project.
+   apple-touch-icon) are in the project.
 3. On the iPad, open that URL in **Safari → Share → Add to Home Screen**. It launches
    fullscreen like a native app, works offline after first load, and **never expires**.
 
-The only remaining step is pushing this repo to a GitLab project so Pages can build it;
-once pushed, the URL is automatic. No Mac, no Apple account, no cable.
+No Mac, no Apple account, no cable — just wait for the Pages action to finish after a
+push, then open the URL.
 
 ---
 
-## Getting the code somewhere (for Paths B and D)
+## Getting the code somewhere (for Path B)
 
-The repo is currently local-only (no remote). To use a cloud build or host the web version
-it needs to be on GitHub or GitLab. Tell me which and I'll push it (it's committed and ready).
+The repo lives at **https://github.com/babyhuey/lifetap** (public). Path D deploys from
+there automatically; Path B (cloud iOS build) can point Codemagic at the same repo.
 
 ---
 
