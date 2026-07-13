@@ -222,6 +222,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                             for (final p in players)
                               if (p.id != players[i].id) p,
                           ],
+                          onEditMe: () =>
+                              _showPlayerSettings(players[i].id, turns[i]),
                         ),
                       ),
                     ),
@@ -758,18 +760,26 @@ class _CounterChip extends StatelessWidget {
   }
 }
 
-/// The per-opponent commander-damage grid pinned to a zone's player-facing
-/// edge: a compact two-column grid of small cells, one per opponent, each
-/// showing a shield icon tinted in that opponent's color and the damage THIS
-/// player has taken from their commander (default 0). Tapping a cell adds one
-/// (dispatching [AdjustCommanderDamage] with the current life-loss setting);
+/// The commander-damage grid pinned to a zone's player-facing edge: a compact
+/// two-column grid of small SQUARE cells, seat-rotated with the zone so they
+/// face the player. The first cell is a "me" identity holder (the player's own
+/// commander art, or their color); the rest are one per opponent, each showing
+/// the opponent's commander art (or their color) with the damage THIS player has
+/// taken from that commander overlaid (default 0). Tapping an opponent cell adds
+/// one (dispatching [AdjustCommanderDamage] with the current life-loss setting);
 /// long-press removes one (clamped at 0, so disabled when already 0). A cell at
-/// 21+ — lethal — flags red.
+/// 21+ — lethal — flags red. Tapping the "me" cell opens the player's settings
+/// sheet (rename/commander/color).
 class _CommanderDamageStrip extends ConsumerWidget {
-  const _CommanderDamageStrip({required this.player, required this.opponents});
+  const _CommanderDamageStrip({
+    required this.player,
+    required this.opponents,
+    required this.onEditMe,
+  });
 
   final PlayerState player;
   final List<PlayerState> opponents;
+  final VoidCallback onEditMe;
 
   void _adjust(WidgetRef ref, int fromPlayerId, int delta) {
     final reduceLife = ref.read(settingsProvider).commanderDamageLifeLoss;
@@ -787,11 +797,21 @@ class _CommanderDamageStrip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final cells = [
+    final cells = <Widget>[
+      // The "me" identity holder leads the grid: own art/color, no damage.
+      _CommanderDamageCell(
+        key: ValueKey('cmdr-me-${player.id}'),
+        color: Color(player.color),
+        artUrl: player.artUrl,
+        label: 'me',
+        onTap: onEditMe,
+        onDecrement: null,
+      ),
       for (final opp in opponents)
         _CommanderDamageCell(
           key: ValueKey('cmdr-${player.id}-${opp.id}'),
           color: Color(opp.color),
+          artUrl: opp.artUrl,
           value: player.commanderDamage[opp.id] ?? 0,
           onTap: () => _adjust(ref, opp.id, 1),
           onDecrement: (player.commanderDamage[opp.id] ?? 0) > 0
@@ -799,7 +819,7 @@ class _CommanderDamageStrip extends ConsumerWidget {
               : null,
         ),
     ];
-    // Two-column grid: rows of two, the last row left-aligned when the opponent
+    // Two-column grid: rows of two, the last row left-aligned when the cell
     // count is odd. Sized to its cells (mainAxisSize.min) so it sits
     // unobtrusively on the zone edge.
     return Column(
@@ -823,55 +843,109 @@ class _CommanderDamageStrip extends ConsumerWidget {
   }
 }
 
-/// One opponent's commander-damage cell: a small rounded tile (dark surface with
-/// a thin border) holding a shield icon tinted in the opponent's color and the
-/// damage taken from them. Opaque so its tap is consumed by this overlay rather
-/// than falling through to the life router below. Flags red at 21+ (lethal).
+/// One square commander-damage cell (radius 8). Its fill is the pictured
+/// player's commander art via [Image.network] ([BoxFit.cover]) when [artUrl] is
+/// set, falling back to their solid [color] while loading, on error, or when no
+/// art exists — so the color never disappears. Because the cell lives inside the
+/// current player's seat-rotated grid, the art is oriented to face that player.
+/// A legibility scrim sits over the fill so the overlaid number (opponent cell)
+/// or [label] ("me" cell) stays readable. Opaque so its tap is consumed by this
+/// overlay rather than falling through to the life router below. An opponent
+/// cell at 21+ ([value] lethal) flags red (border + wash); the "me" cell passes
+/// a null [value] and carries no damage number.
 class _CommanderDamageCell extends StatelessWidget {
   const _CommanderDamageCell({
     super.key,
     required this.color,
-    required this.value,
+    required this.artUrl,
     required this.onTap,
     required this.onDecrement,
+    this.value,
+    this.label,
   });
 
   final Color color;
-  final int value;
+  final String? artUrl;
+  final int? value;
+  final String? label;
   final VoidCallback onTap;
   final VoidCallback? onDecrement;
 
+  static const double _size = 44;
+
   @override
   Widget build(BuildContext context) {
-    final lethal = value >= 21;
+    final lethal = (value ?? 0) >= 21;
+    final art = artUrl;
+    // Art when available, the pictured player's color otherwise — the fallback
+    // also covers the loading and error states so a cell is never blank.
+    final Widget fill = art != null
+        ? Image.network(
+            art,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stack) => ColoredBox(color: color),
+            loadingBuilder: (context, child, progress) =>
+                progress == null ? child : ColoredBox(color: color),
+          )
+        : ColoredBox(color: color);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       onLongPress: onDecrement,
       child: Container(
-        width: 54,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        width: _size,
+        height: _size,
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: lethal
-              ? LifeTapColors.negative.withValues(alpha: 0.85)
-              : LifeTapColors.chip,
+          color: LifeTapColors.chip,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: lethal ? LifeTapColors.negative : LifeTapColors.divider,
-            width: 1,
+            width: lethal ? 2 : 1,
           ),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Icon(Icons.shield, size: 14, color: color),
-            const SizedBox(width: 4),
-            Text(
-              '$value',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
+            fill,
+            // Scrim so the white number/label stays legible over art or a
+            // bright fallback color.
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.15),
+                    Colors.black.withValues(alpha: 0.55),
+                  ],
+                ),
+              ),
+            ),
+            // Lethal (21+): a red wash reinforcing the red border.
+            if (lethal)
+              ColoredBox(color: LifeTapColors.negative.withValues(alpha: 0.35)),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(3),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    value == null ? (label ?? '') : '$value',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: value == null ? 12 : 16,
+                      fontWeight: FontWeight.w800,
+                      shadows: const [
+                        Shadow(
+                          color: Colors.black,
+                          blurRadius: 4,
+                          offset: Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ],
