@@ -92,4 +92,35 @@ void main() {
     expect(after.commanderDamage, before.commanderDamage);
     expect(after.life, before.life);
   });
+
+  testWidgets('commander-damage squares are positional: each opponent points '
+      'toward its seat and the "me" holder sits toward the outer edge', (
+    tester,
+  ) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: GameScreen()),
+      ),
+    );
+    await tester.pump();
+
+    // Default 4-player 2x2 on the 800x600 test surface: player 0 is the
+    // top-left zone. Opponent 1 sits to its physical right, opponent 2 directly
+    // below, and the "me" holder is nudged toward the outer (top-left) edge,
+    // away from the screen centre.
+    final me = tester.getCenter(find.byKey(const ValueKey('cmdr-me-0')));
+    final right = tester.getCenter(find.byKey(const ValueKey('cmdr-0-1')));
+    final below = tester.getCenter(find.byKey(const ValueKey('cmdr-0-2')));
+
+    // Opponent 1's square is pushed toward its seat on the right, opponent 2's
+    // toward its seat below, and the "me" holder sits up-and-left of both.
+    expect(right.dx, greaterThan(me.dx));
+    expect(below.dy, greaterThan(me.dy));
+    expect(right.dx, greaterThan(below.dx));
+    expect(below.dy, greaterThan(right.dy));
+  });
 }
