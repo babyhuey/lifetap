@@ -203,32 +203,54 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                     ),
                   ),
                 ),
-              // The commander-damage strip also sits above the Listener so its
-              // chips adjust commander damage instead of routing a life tap;
-              // like the gear/name only each chip's hit area is consumed, the
-              // rest of the cell falls through to the router.
-              for (var i = 0; i < players.length; i++)
+              // The commander-damage squares sit above the Listener so their
+              // taps adjust commander damage instead of routing a life tap;
+              // like the gear/name only each square's hit area is consumed, the
+              // rest of the zone falls through to the router. Each square is
+              // positioned in PHYSICAL screen space: an opponent's square sits
+              // on the side of the player's zone that faces that opponent's
+              // seat, and the player's own "me" holder sits toward the zone's
+              // outer edge. Only each square's CONTENT is seat-rotated so it
+              // reads right-side-up for the player; the position stays physical.
+              for (var i = 0; i < players.length; i++) ...[
                 Positioned.fromRect(
-                  rect: rects[i],
-                  child: RotatedBox(
+                  rect: _meSquareRect(rects[i], size),
+                  child: _CommanderDamageSquare(
+                    key: ValueKey('cmdr-me-${players[i].id}'),
                     quarterTurns: turns[i],
-                    child: Align(
-                      alignment: Alignment.bottomCenter,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _CommanderDamageStrip(
-                          player: players[i],
-                          opponents: [
-                            for (final p in players)
-                              if (p.id != players[i].id) p,
-                          ],
-                          onEditMe: () =>
-                              _showPlayerSettings(players[i].id, turns[i]),
-                        ),
-                      ),
-                    ),
+                    color: Color(players[i].color),
+                    artUrl: players[i].artUrl,
+                    label: 'me',
+                    onTap: () => _showPlayerSettings(players[i].id, turns[i]),
+                    onDecrement: null,
                   ),
                 ),
+                for (var j = 0; j < players.length; j++)
+                  if (j != i)
+                    Positioned.fromRect(
+                      rect: _opponentSquareRect(rects[i], rects[j]),
+                      child: _CommanderDamageSquare(
+                        key: ValueKey('cmdr-${players[i].id}-${players[j].id}'),
+                        quarterTurns: turns[i],
+                        color: Color(players[j].color),
+                        artUrl: players[j].artUrl,
+                        value: players[i].commanderDamage[players[j].id] ?? 0,
+                        onTap: () => _adjustCommanderDamage(
+                          players[i].id,
+                          players[j].id,
+                          1,
+                        ),
+                        onDecrement:
+                            (players[i].commanderDamage[players[j].id] ?? 0) > 0
+                            ? () => _adjustCommanderDamage(
+                                players[i].id,
+                                players[j].id,
+                                -1,
+                              )
+                            : null,
+                      ),
+                    ),
+              ],
               Positioned.fromRect(
                 rect: layout.toolbar,
                 child: _Toolbar(
@@ -286,6 +308,23 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       builder: (context) =>
           _PlayerSettingsSheet(playerId: playerId, quarterTurns: quarterTurns),
     );
+  }
+
+  /// Applies a commander-damage change to [playerId] from [fromPlayerId]'s
+  /// commander, reading the current "Commander damage life loss" setting so the
+  /// life side tracks the toggle.
+  void _adjustCommanderDamage(int playerId, int fromPlayerId, int delta) {
+    final reduceLife = ref.read(settingsProvider).commanderDamageLifeLoss;
+    ref
+        .read(gameProvider.notifier)
+        .dispatch(
+          AdjustCommanderDamage(
+            playerId: playerId,
+            fromPlayerId: fromPlayerId,
+            delta: delta,
+            reduceLife: reduceLife,
+          ),
+        );
   }
 
   /// Opens the seat-rotated counters popup: the fuller management view for this
@@ -377,6 +416,52 @@ List<Rect> _zoneRects(int count, Size size) {
     );
   }
   return rects;
+}
+
+/// Side length and in-zone margin of a positional commander-damage square.
+const double _cmdrSquareSize = 44;
+const double _cmdrSquareMargin = 6;
+
+/// Clamps a [_cmdrSquareSize] square centered at [center] so it stays fully
+/// inside [zone] with [_cmdrSquareMargin] to spare, returning its rect. Keeps a
+/// positional commander-damage square from spilling outside its player's zone;
+/// falls back to the zone center on an axis too small to hold the square.
+Rect _clampSquareInZone(Rect zone, Offset center) {
+  const half = _cmdrSquareSize / 2;
+  final minX = zone.left + _cmdrSquareMargin + half;
+  final maxX = zone.right - _cmdrSquareMargin - half;
+  final minY = zone.top + _cmdrSquareMargin + half;
+  final maxY = zone.bottom - _cmdrSquareMargin - half;
+  final cx = maxX >= minX ? center.dx.clamp(minX, maxX) : zone.center.dx;
+  final cy = maxY >= minY ? center.dy.clamp(minY, maxY) : zone.center.dy;
+  return Rect.fromCenter(
+    center: Offset(cx, cy),
+    width: _cmdrSquareSize,
+    height: _cmdrSquareSize,
+  );
+}
+
+/// Where the square for opponent [opponentZone] lands inside player [zone]:
+/// pushed from the zone center toward that opponent's seat by 30% of the zone's
+/// shorter side, then clamped to stay in-zone. So the opponent on the player's
+/// physical right shows up on the right, the one across shows up across, etc.
+Rect _opponentSquareRect(Rect zone, Rect opponentZone) {
+  final toOpponent = opponentZone.center - zone.center;
+  final distance = toOpponent.distance;
+  final dir = distance == 0 ? Offset.zero : toOpponent / distance;
+  final reach = 0.30 * min(zone.width, zone.height);
+  return _clampSquareInZone(zone, zone.center + dir * reach);
+}
+
+/// Where player [zone]'s own "me" holder lands: nudged from the zone center
+/// toward the zone's outer edge (away from [screen] center) so it clears the big
+/// life number, then clamped to stay in-zone.
+Rect _meSquareRect(Rect zone, Size screen) {
+  final outward = zone.center - screen.center(Offset.zero);
+  final distance = outward.distance;
+  final dir = distance == 0 ? const Offset(0, 1) : outward / distance;
+  final reach = 0.34 * min(zone.width, zone.height);
+  return _clampSquareInZone(zone, zone.center + dir * reach);
 }
 
 /// True when the player has reached a lethal threshold under the current
@@ -625,8 +710,8 @@ class _ZoneContent extends StatelessWidget {
             Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
-                // Raised above the commander-damage strip that the overlay
-                // layer pins to the player-facing bottom edge.
+                // Lifted off the player-facing bottom edge so the chips clear
+                // it and the commander-damage squares floating over the zone.
                 padding: const EdgeInsets.only(bottom: 46),
                 child: knockedOut
                     ? Opacity(
@@ -760,102 +845,23 @@ class _CounterChip extends StatelessWidget {
   }
 }
 
-/// The commander-damage grid pinned to a zone's player-facing edge: a compact
-/// two-column grid of small SQUARE cells, seat-rotated with the zone so they
-/// face the player. The first cell is a "me" identity holder (the player's own
-/// commander art, or their color); the rest are one per opponent, each showing
-/// the opponent's commander art (or their color) with the damage THIS player has
-/// taken from that commander overlaid (default 0). Tapping an opponent cell adds
-/// one (dispatching [AdjustCommanderDamage] with the current life-loss setting);
-/// long-press removes one (clamped at 0, so disabled when already 0). A cell at
-/// 21+ — lethal — flags red. Tapping the "me" cell opens the player's settings
-/// sheet (rename/commander/color).
-class _CommanderDamageStrip extends ConsumerWidget {
-  const _CommanderDamageStrip({
-    required this.player,
-    required this.opponents,
-    required this.onEditMe,
-  });
-
-  final PlayerState player;
-  final List<PlayerState> opponents;
-  final VoidCallback onEditMe;
-
-  void _adjust(WidgetRef ref, int fromPlayerId, int delta) {
-    final reduceLife = ref.read(settingsProvider).commanderDamageLifeLoss;
-    ref
-        .read(gameProvider.notifier)
-        .dispatch(
-          AdjustCommanderDamage(
-            playerId: player.id,
-            fromPlayerId: fromPlayerId,
-            delta: delta,
-            reduceLife: reduceLife,
-          ),
-        );
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final cells = <Widget>[
-      // The "me" identity holder leads the grid: own art/color, no damage.
-      _CommanderDamageCell(
-        key: ValueKey('cmdr-me-${player.id}'),
-        color: Color(player.color),
-        artUrl: player.artUrl,
-        label: 'me',
-        onTap: onEditMe,
-        onDecrement: null,
-      ),
-      for (final opp in opponents)
-        _CommanderDamageCell(
-          key: ValueKey('cmdr-${player.id}-${opp.id}'),
-          color: Color(opp.color),
-          artUrl: opp.artUrl,
-          value: player.commanderDamage[opp.id] ?? 0,
-          onTap: () => _adjust(ref, opp.id, 1),
-          onDecrement: (player.commanderDamage[opp.id] ?? 0) > 0
-              ? () => _adjust(ref, opp.id, -1)
-              : null,
-        ),
-    ];
-    // Two-column grid: rows of two, the last row left-aligned when the cell
-    // count is odd. Sized to its cells (mainAxisSize.min) so it sits
-    // unobtrusively on the zone edge.
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 0; i < cells.length; i += 2) ...[
-          if (i > 0) const SizedBox(height: 6),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              cells[i],
-              if (i + 1 < cells.length) ...[
-                const SizedBox(width: 6),
-                cells[i + 1],
-              ],
-            ],
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-/// One square commander-damage cell (radius 8). Its fill is the pictured
-/// player's commander art via [Image.network] ([BoxFit.cover]) when [artUrl] is
-/// set, falling back to their solid [color] while loading, on error, or when no
-/// art exists — so the color never disappears. Because the cell lives inside the
-/// current player's seat-rotated grid, the art is oriented to face that player.
-/// A legibility scrim sits over the fill so the overlaid number (opponent cell)
-/// or [label] ("me" cell) stays readable. Opaque so its tap is consumed by this
-/// overlay rather than falling through to the life router below. An opponent
-/// cell at 21+ ([value] lethal) flags red (border + wash); the "me" cell passes
-/// a null [value] and carries no damage number.
-class _CommanderDamageCell extends StatelessWidget {
-  const _CommanderDamageCell({
+/// One positional commander-damage square (side [_cmdrSquareSize], radius 8),
+/// placed in physical screen space by the game screen and oriented for the
+/// player via [quarterTurns]. Its fill is the pictured player's commander art
+/// via [Image.network] ([BoxFit.cover]) when [artUrl] is set, falling back to
+/// their solid [color] while loading, on error, or when no art exists — so the
+/// color never disappears. The fill/number/label are wrapped in a
+/// [RotatedBox]([quarterTurns]) so they read right-side-up for the player even
+/// though the square's position is physical, not inside a zone-wide rotation. A
+/// legibility scrim sits over the fill so the overlaid number (opponent square)
+/// or [label] ("me" square) stays readable. Opaque so its tap is consumed by
+/// this overlay rather than falling through to the life router below. An
+/// opponent square at 21+ ([value] lethal) flags red (border + wash); the "me"
+/// square passes a null [value] and carries no damage number.
+class _CommanderDamageSquare extends StatelessWidget {
+  const _CommanderDamageSquare({
     super.key,
+    required this.quarterTurns,
     required this.color,
     required this.artUrl,
     required this.onTap,
@@ -864,14 +870,13 @@ class _CommanderDamageCell extends StatelessWidget {
     this.label,
   });
 
+  final int quarterTurns;
   final Color color;
   final String? artUrl;
   final int? value;
   final String? label;
   final VoidCallback onTap;
   final VoidCallback? onDecrement;
-
-  static const double _size = 44;
 
   @override
   Widget build(BuildContext context) {
@@ -893,8 +898,8 @@ class _CommanderDamageCell extends StatelessWidget {
       onTap: onTap,
       onLongPress: onDecrement,
       child: Container(
-        width: _size,
-        height: _size,
+        width: _cmdrSquareSize,
+        height: _cmdrSquareSize,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: LifeTapColors.chip,
@@ -904,51 +909,58 @@ class _CommanderDamageCell extends StatelessWidget {
             width: lethal ? 2 : 1,
           ),
         ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            fill,
-            // Scrim so the white number/label stays legible over art or a
-            // bright fallback color.
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.15),
-                    Colors.black.withValues(alpha: 0.55),
-                  ],
+        // The square's position is physical; only its content rotates so the
+        // art/number/"me" label read right-side-up for the player.
+        child: RotatedBox(
+          quarterTurns: quarterTurns,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              fill,
+              // Scrim so the white number/label stays legible over art or a
+              // bright fallback color.
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.15),
+                      Colors.black.withValues(alpha: 0.55),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            // Lethal (21+): a red wash reinforcing the red border.
-            if (lethal)
-              ColoredBox(color: LifeTapColors.negative.withValues(alpha: 0.35)),
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(3),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    value == null ? (label ?? '') : '$value',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: value == null ? 12 : 16,
-                      fontWeight: FontWeight.w800,
-                      shadows: const [
-                        Shadow(
-                          color: Colors.black,
-                          blurRadius: 4,
-                          offset: Offset(0, 1),
-                        ),
-                      ],
+              // Lethal (21+): a red wash reinforcing the red border.
+              if (lethal)
+                ColoredBox(
+                  color: LifeTapColors.negative.withValues(alpha: 0.35),
+                ),
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(3),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      value == null ? (label ?? '') : '$value',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: value == null ? 12 : 16,
+                        fontWeight: FontWeight.w800,
+                        shadows: const [
+                          Shadow(
+                            color: Colors.black,
+                            blurRadius: 4,
+                            offset: Offset(0, 1),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
