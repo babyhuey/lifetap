@@ -68,4 +68,33 @@ void main() {
 
     expect(container.read(gameProvider).current.monarchId, 0);
   });
+
+  testWidgets('the top (q2) seat\'s counters button opens the popup — it is not '
+      'buried under the fixed north-up commander grid', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: GameScreen()),
+      ),
+    );
+    await tester.pump();
+
+    // A 2-player table: seat 0 is the top seat, facing down (q2). Its counters
+    // button used to be seat-rotated onto the grid's screen corner, where the
+    // grid stole the tap; it now sits at the fixed screen top-left corner.
+    container.read(gameProvider.notifier).newGame(2, 40);
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('counters-0')));
+    await tester.pumpAndSettle();
+
+    // The counters popup opened (its footer is a reliable marker).
+    expect(
+      find.text('Tap to increment. Hold for additional options.'),
+      findsOneWidget,
+    );
+  });
 }

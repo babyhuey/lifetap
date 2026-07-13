@@ -143,45 +143,45 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                   ),
                 ),
               ),
-              // Gear affordances sit above the Listener so a tap opens the
-              // settings sheet instead of the router reading it as a life tap.
-              // Only the icon is hittable; the rest of each cell falls through.
+              // Gear affordances sit above the Listener at the zone's fixed
+              // screen top-right corner (screen-framed, NOT seat-rotated) so they
+              // share the grid's north-up frame and can't collide with the fixed
+              // commander grid at the bottom-right. A tap opens the settings
+              // dialog instead of the router reading it as a life tap. Only the
+              // icon is hittable; the rest of each cell falls through.
               for (var i = 0; i < players.length; i++)
                 Positioned.fromRect(
                   rect: rects[i],
-                  child: RotatedBox(
-                    quarterTurns: turns[i],
-                    child: Align(
-                      alignment: Alignment.topRight,
-                      child: IconButton(
-                        tooltip: 'Player settings',
-                        color: Colors.white70,
-                        iconSize: 20,
-                        icon: const Icon(Icons.settings),
-                        onPressed: () =>
-                            _showPlayerSettings(players[i].id, turns[i]),
-                      ),
+                  child: Align(
+                    alignment: Alignment.topRight,
+                    child: IconButton(
+                      tooltip: 'Player settings',
+                      color: Colors.white70,
+                      iconSize: 20,
+                      icon: const Icon(Icons.settings),
+                      onPressed: () =>
+                          _showPlayerSettings(players[i].id, turns[i]),
                     ),
                   ),
                 ),
-              // The counters affordance sits above the Listener at the seat's
-              // top-inner corner so tapping it opens the counters popup instead
-              // of routing a life tap; only its hit area is consumed.
+              // The counters affordance sits above the Listener at the zone's
+              // fixed screen top-left corner (screen-framed, NOT seat-rotated) so
+              // it shares the grid's north-up frame and can't collide with the
+              // fixed commander grid at the bottom-right. Tapping it opens the
+              // counters popup instead of routing a life tap; only its hit area
+              // is consumed.
               for (var i = 0; i < players.length; i++)
                 Positioned.fromRect(
                   rect: rects[i],
-                  child: RotatedBox(
-                    quarterTurns: turns[i],
-                    child: Align(
-                      alignment: Alignment.topLeft,
-                      child: IconButton(
-                        key: ValueKey('counters-${players[i].id}'),
-                        tooltip: 'Counters',
-                        color: Colors.white70,
-                        iconSize: 20,
-                        icon: const Icon(Icons.grid_view),
-                        onPressed: () => _showCounters(players[i].id, turns[i]),
-                      ),
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: IconButton(
+                      key: ValueKey('counters-${players[i].id}'),
+                      tooltip: 'Counters',
+                      color: Colors.white70,
+                      iconSize: 20,
+                      icon: const Icon(Icons.grid_view),
+                      onPressed: () => _showCounters(players[i].id, turns[i]),
                     ),
                   ),
                 ),
@@ -203,7 +203,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       alignment: Alignment.bottomRight,
                       child: Padding(
                         padding: const EdgeInsets.all(10),
-                        child: _commanderDamageGrid(players, i, turns, rects),
+                        child: _commanderDamageGrid(players, i, turns),
                       ),
                     ),
                   ),
@@ -303,10 +303,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 
   Future<void> _showPlayerSettings(int playerId, int quarterTurns) async {
-    await showModalBottomSheet<void>(
+    await showDialog<void>(
       context: context,
-      backgroundColor: LifeTapColors.surface,
-      isScrollControlled: true,
       builder: (context) =>
           _PlayerSettingsSheet(playerId: playerId, quarterTurns: quarterTurns),
     );
@@ -329,31 +327,22 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         );
   }
 
-  /// The egocentric commander-damage map for the player at [index]: a player's-
-  /// eye view of the table. The current player is at the NEAR side — their "me"
-  /// tile sits at the bottom — and every opponent is arrayed in a row ABOVE it,
-  /// ordered left-to-right exactly as this player sees them across the table.
+  /// The fixed north-up commander-damage minimap for the player at [index]: one
+  /// cell per player in seat/index order (index 0 = top-left cell, etc.), so the
+  /// map reads the same from every seat. The current player's cell is the "me"
+  /// tile, which shows their own art/color and opens their settings; every other
+  /// cell shows that opponent's art/color plus this player's commander damage
+  /// from them (tap +1 / long-press −1, clamped ≥ 0, 21+ flags red).
   ///
-  /// The left→right opponent order is recovered from the physical seat [rects]:
-  /// for each opponent O the vector `v = rectO.center - rectP.center` is rotated
-  /// out of screen space into P's own facing frame (un-rotating by P's
-  /// [seatQuarterTurns]); its x then increases from P's left to P's right, so
-  /// sorting opponents by that x lays them out the way P would see them.
-  ///
-  /// The opponent tiles flow in a [Wrap] so a wide row (5 opponents) can spill
-  /// to a second row rather than overflow, with the "me" tile always below all
-  /// of them. Each opponent tile shows that opponent's art/color plus this
-  /// player's commander damage from them (tap +1 / long-press −1, clamped ≥ 0,
-  /// 21+ flags red); the "me" tile shows the player's own art/color and a "me"
-  /// label and opens their settings. The caller anchors this map at the zone's
-  /// bottom-right WITHOUT seat rotation, so the map reads north-up from every
-  /// seat; each tile passes `quarterTurns: turns[index]` so only its
-  /// number/label rotates to face this player.
+  /// The cells flow in a [Wrap] (2 columns) so a wide table can spill to a
+  /// second row rather than overflow. The caller anchors this map at the zone's
+  /// bottom-right WITHOUT seat rotation, so it reads north-up from every seat;
+  /// each cell passes `quarterTurns: turns[index]` so only its number/label
+  /// rotates to face this player.
   Widget _commanderDamageGrid(
     List<PlayerState> players,
     int index,
     List<int> turns,
-    List<Rect> rects,
   ) {
     final me = players[index];
     // One cell per player in seat/index order → a 2-column grid that mirrors
@@ -494,14 +483,11 @@ List<Rect> _zoneRects(int count, Size size) {
 const double _cmdrCellSize = 40;
 const double _cmdrCellGap = 4;
 
-/// True when the player has reached a lethal threshold under the current
-/// settings — used only for the knocked-out visual, never for game logic.
+/// True when Auto-KO is on AND the player is dead (see [PlayerState.isDead]) —
+/// used only for the knocked-out visual, never for game logic. Lethal commander
+/// damage KOs regardless of the "life loss" toggle, matching [PlayerState.isDead].
 bool _knockedOut(PlayerState player, GameSettings settings) {
-  if (!settings.autoKo) return false;
-  final cmdrLethal =
-      settings.commanderDamageLifeLoss &&
-      player.commanderDamage.values.any((d) => d >= 21);
-  return player.life <= 0 || player.poison >= 10 || cmdrLethal;
+  return settings.autoKo && player.isDead;
 }
 
 /// Luminance-weighted saturation matrix that maps every color to its grey
@@ -1141,20 +1127,39 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
 
   Future<void> _submitCommander(String value) async {
     final name = value.trim();
+    final notifier = ref.read(gameProvider.notifier);
+    if (name.isEmpty) {
+      notifier.dispatch(
+        SetCommander(
+          playerId: widget.playerId,
+          commanderName: null,
+          artUrl: null,
+        ),
+      );
+      return;
+    }
     setState(() => _resolving = true);
-    final source = ref.read(commanderArtSourceProvider);
-    final art = name.isEmpty ? null : await source.artUrl(name);
+    final art = await ref.read(commanderArtSourceProvider).artUrl(name);
     if (!mounted) return;
-    ref
-        .read(gameProvider.notifier)
-        .dispatch(
-          SetCommander(
-            playerId: widget.playerId,
-            commanderName: name.isEmpty ? null : name,
-            artUrl: art,
-          ),
-        );
     setState(() => _resolving = false);
+    final existingArt = ref
+        .read(gameProvider)
+        .current
+        .player(widget.playerId)
+        .artUrl;
+    notifier.dispatch(
+      SetCommander(
+        playerId: widget.playerId,
+        commanderName: name,
+        // Keep existing art when the lookup fails rather than blanking the zone.
+        artUrl: art ?? existingArt,
+      ),
+    );
+    if (art == null && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Couldn\'t find art for "$name"')));
+    }
   }
 
   void _recolor(int color) {
@@ -1201,78 +1206,87 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
             ),
           )
         : null;
-    return SafeArea(
+    // A centered, width-constrained rotated card (same shape as the counters
+    // popup) so a side-seat (q1/q3) rotation stays a compact panel instead of a
+    // tight modal width flipping to a full-screen stretched height.
+    return Center(
       child: RotatedBox(
         quarterTurns: widget.quarterTurns,
-        child: Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 16,
-            bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (inAppKeyboard)
-                TextField(
-                  key: const ValueKey('field-name'),
-                  controller: _nameController,
-                  readOnly: true,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                  onTap: () => _editField(_nameController, 'Name', _submitName),
-                )
-              else
-                TextField(
-                  key: const ValueKey('field-name'),
-                  controller: _nameController,
-                  textInputAction: TextInputAction.done,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                  onSubmitted: _submitName,
-                ),
-              const SizedBox(height: 12),
-              if (inAppKeyboard)
-                TextField(
-                  key: const ValueKey('field-commander'),
-                  controller: _commanderController,
-                  readOnly: true,
-                  decoration: InputDecoration(
-                    labelText: 'Commander',
-                    suffixIcon: suffix,
-                  ),
-                  onTap: () => _editField(
-                    _commanderController,
-                    'Commander',
-                    _submitCommander,
-                  ),
-                )
-              else
-                TextField(
-                  key: const ValueKey('field-commander'),
-                  controller: _commanderController,
-                  textInputAction: TextInputAction.done,
-                  decoration: InputDecoration(
-                    labelText: 'Commander',
-                    suffixIcon: suffix,
-                  ),
-                  onSubmitted: _submitCommander,
-                ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        child: Material(
+          color: Colors.transparent,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 340),
+            child: Container(
+              decoration: BoxDecoration(
+                color: _PopupColors.surface,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final swatch in defaultColors)
-                    GestureDetector(
-                      onTap: () => _recolor(swatch),
-                      child: CircleAvatar(
-                        backgroundColor: Color(swatch),
-                        radius: 16,
-                      ),
+                  if (inAppKeyboard)
+                    TextField(
+                      key: const ValueKey('field-name'),
+                      controller: _nameController,
+                      readOnly: true,
+                      decoration: const InputDecoration(labelText: 'Name'),
+                      onTap: () =>
+                          _editField(_nameController, 'Name', _submitName),
+                    )
+                  else
+                    TextField(
+                      key: const ValueKey('field-name'),
+                      controller: _nameController,
+                      textInputAction: TextInputAction.done,
+                      decoration: const InputDecoration(labelText: 'Name'),
+                      onSubmitted: _submitName,
                     ),
+                  const SizedBox(height: 12),
+                  if (inAppKeyboard)
+                    TextField(
+                      key: const ValueKey('field-commander'),
+                      controller: _commanderController,
+                      readOnly: true,
+                      decoration: InputDecoration(
+                        labelText: 'Commander',
+                        suffixIcon: suffix,
+                      ),
+                      onTap: () => _editField(
+                        _commanderController,
+                        'Commander',
+                        _submitCommander,
+                      ),
+                    )
+                  else
+                    TextField(
+                      key: const ValueKey('field-commander'),
+                      controller: _commanderController,
+                      textInputAction: TextInputAction.done,
+                      decoration: InputDecoration(
+                        labelText: 'Commander',
+                        suffixIcon: suffix,
+                      ),
+                      onSubmitted: _submitCommander,
+                    ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      for (final swatch in defaultColors)
+                        GestureDetector(
+                          onTap: () => _recolor(swatch),
+                          child: CircleAvatar(
+                            backgroundColor: Color(swatch),
+                            radius: 16,
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
       ),

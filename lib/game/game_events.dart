@@ -149,12 +149,11 @@ class AdjustCommanderDamage extends GameEvent {
     final p = state.player(playerId);
     final current = p.commanderDamage[fromPlayerId] ?? 0;
     final next = current + delta;
+    final clamped = next < 0 ? 0 : next;
+    final applied = clamped - current; // differs from delta only at the 0 floor
     final updated = p.copyWith(
-      commanderDamage: {
-        ...p.commanderDamage,
-        fromPlayerId: next < 0 ? 0 : next,
-      },
-      life: reduceLife ? p.life - delta : p.life,
+      commanderDamage: {...p.commanderDamage, fromPlayerId: clamped},
+      life: reduceLife ? p.life - applied : p.life,
     );
     return state.replacePlayer(updated);
   }
