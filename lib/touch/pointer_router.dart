@@ -194,11 +194,18 @@ class PointerRouter {
   /// injected clock.
   void tick() {
     final now = clock();
+    final firedZones = <int>{};
     for (final p in _active.values.toList()) {
       if (p.moved) continue; // a drag/swipe in progress, not a stationary hold
-      final repeats = p.hold.poll(now);
+      final repeats = p.hold.poll(
+        now,
+      ); // always poll to advance the accumulator
       if (repeats == 0) continue;
       p.repeated = true;
+      // Co-located held fingers count as one hold: only the first pointer in a
+      // zone emits this tick's repeats, so N fingers don't multiply the rate
+      // (mirrors the tap-side dedup in up()).
+      if (!firedZones.add(p.zone)) continue;
       // Same per-seat sign as a one-shot tap so a held finger repeats in the
       // direction the seated player expects. Each repeat is exactly ±1.
       final step = _signAt(p.downPos, p.zone);

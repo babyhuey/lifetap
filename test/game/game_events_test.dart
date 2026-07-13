@@ -126,6 +126,61 @@ void main() {
         reason: 'life is unchanged when reduceLife is false',
       );
     });
+
+    test(
+      'a decrement past the 0 floor credits life by only the applied change',
+      () {
+        var state = _newGame(life: 40);
+        state = AdjustCommanderDamage(
+          playerId: 0,
+          fromPlayerId: 1,
+          delta: 3,
+        ).apply(state);
+        expect(state.player(0).commanderDamage[1], 3);
+        expect(state.player(0).life, 37);
+
+        // Decrement by 10: the counter clamps to 0 (a −3 change), so life may only
+        // be credited 3 back to 40 — not the raw 10 up to 47.
+        state = AdjustCommanderDamage(
+          playerId: 0,
+          fromPlayerId: 1,
+          delta: -10,
+        ).apply(state);
+
+        expect(state.player(0).commanderDamage[1], 0);
+        expect(
+          state.player(0).life,
+          40,
+          reason:
+              'life is credited the clamped change (3), not the raw delta (10)',
+        );
+      },
+    );
+
+    test(
+      'lethality is per-opponent: 13 + 13 from two opponents is not dead',
+      () {
+        var state = _newGame(players: 3, life: 40);
+        state = AdjustCommanderDamage(
+          playerId: 0,
+          fromPlayerId: 1,
+          delta: 13,
+        ).apply(state);
+        state = AdjustCommanderDamage(
+          playerId: 0,
+          fromPlayerId: 2,
+          delta: 13,
+        ).apply(state);
+
+        expect(state.player(0).commanderDamage[1], 13);
+        expect(state.player(0).commanderDamage[2], 13);
+        expect(
+          state.player(0).isDead,
+          isFalse,
+          reason: 'only 21+ from a single opponent is lethal, not the sum',
+        );
+      },
+    );
   });
 
   group('rename and recolor', () {

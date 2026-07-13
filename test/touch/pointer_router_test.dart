@@ -350,6 +350,37 @@ void main() {
       },
     );
 
+    test('two fingers held in one zone repeat at the same rate as one (a '
+        'co-located hold does not multiply the count)', () {
+      var now = Duration.zero;
+      Duration clock() => now;
+
+      final single = makeRouter(clock);
+      final pair = makeRouter(clock);
+
+      single.router.down(1, _zone0Right);
+      pair.router.down(1, _zone0Right);
+      pair.router.down(2, _zone0Right); // a second finger in the SAME zone
+
+      // Poll both on the same cadence over the same span.
+      for (var ms = 20; ms <= 2000; ms += 20) {
+        now = Duration(milliseconds: ms);
+        single.router.tick();
+        pair.router.tick();
+      }
+
+      expect(single.results, isNotEmpty);
+      expect(
+        pair.results.length,
+        single.results.length,
+        reason: 'two co-located held fingers must not double the repeats',
+      );
+      expect(
+        pair.results.every((r) => (r as TapResult).magnitude == 1),
+        isTrue,
+      );
+    });
+
     test('up after repeats does not add an extra tap', () {
       var now = Duration.zero;
       final (:router, :results) = makeRouter(() => now);
@@ -448,7 +479,11 @@ void main() {
       final drawn = {
         for (var seed = 0; seed < 200; seed++) pickWinner(ids, seed),
       };
-      expect(drawn, isNotEmpty);
+      expect(
+        drawn.length,
+        greaterThan(1),
+        reason: 'a constant picker would only ever draw one id',
+      );
       expect(drawn.every(ids.contains), isTrue);
     });
 

@@ -22,14 +22,16 @@ class ScryfallArtSource implements CommanderArtSource {
       'fuzzy': commanderName,
     });
     try {
-      final response = await _client.get(
-        uri,
-        headers: const {
-          // Scryfall asks callers to identify themselves and request JSON.
-          'User-Agent': 'LifeTap2/1.0',
-          'Accept': 'application/json',
-        },
-      );
+      final response = await _client
+          .get(
+            uri,
+            headers: const {
+              // Scryfall asks callers to identify themselves and request JSON.
+              'User-Agent': 'LifeTap2/1.0',
+              'Accept': 'application/json',
+            },
+          )
+          .timeout(const Duration(seconds: 10));
       if (response.statusCode != 200) return null;
       final decoded = jsonDecode(response.body);
       if (decoded is! Map) return null;

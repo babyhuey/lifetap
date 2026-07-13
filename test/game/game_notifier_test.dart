@@ -16,7 +16,7 @@ void main() {
 
   test('starts as a 4-player, 40-life game with a single history event', () {
     expect(session().current.playerCount, 4);
-    expect(session().current.players, everyElement(isA<PlayerState>()));
+    expect(session().current.players.map((p) => p.id), [0, 1, 2, 3]);
     expect(session().current.players.map((p) => p.life), everyElement(40));
     expect(session().history, hasLength(1));
   });
@@ -110,4 +110,111 @@ void main() {
     notifier().undo();
     expect(session().current.dayNight, DayNight.none);
   });
+
+  test('undo of SetMonarch restores the prior holder, not just null', () {
+    notifier().newGame(4, 40);
+
+    notifier().dispatch(const SetMonarch(playerId: 0));
+    notifier().dispatch(const SetMonarch(playerId: 1));
+    expect(session().current.monarchId, 1);
+
+    notifier().undo();
+    expect(
+      session().current.monarchId,
+      0,
+      reason: 'undo re-folds to the prior holder (A), not a cleared field',
+    );
+  });
+
+  test('undo of SetInitiative restores the prior holder, not just null', () {
+    notifier().newGame(4, 40);
+
+    notifier().dispatch(const SetInitiative(playerId: 0));
+    notifier().dispatch(const SetInitiative(playerId: 1));
+    expect(session().current.initiativeId, 1);
+
+    notifier().undo();
+    expect(
+      session().current.initiativeId,
+      0,
+      reason: 'undo re-folds to the prior holder (A), not a cleared field',
+    );
+  });
+
+  test(
+    'undo restores the exact prior value even when the redone event clamped',
+    () {
+      notifier().newGame(2, 40);
+
+      notifier().dispatch(
+        const AdjustCounter(playerId: 0, mode: CounterMode.poison, delta: 997),
+      );
+      expect(session().current.player(0).poison, 997);
+
+      // +5 would reach 1002 but clamps to 999 — the real change is only +2.
+      notifier().dispatch(
+        const AdjustCounter(playerId: 0, mode: CounterMode.poison, delta: 5),
+      );
+      expect(
+        session().current.player(0).poison,
+        999,
+        reason: 'clamped at the cap',
+      );
+
+      notifier().undo();
+      expect(
+        session().current.player(0).poison,
+        997,
+        reason: 're-folding restores the exact prior value, not 999 - 5',
+      );
+    },
+  );
+
+  test('dropping the last event and re-folding equals the state after one undo '
+      '(re-fold invariant across event types)', () {
+    notifier().newGame(4, 40);
+
+    const events = <GameEvent>[
+      AdjustCounter(playerId: 0, mode: CounterMode.life, delta: -5),
+      AdjustCommanderDamage(playerId: 1, fromPlayerId: 0, delta: 7),
+      SetMonarch(playerId: 2),
+      AdjustNamedCounter(playerId: 3, name: 'Treasure', delta: 4),
+      CycleDayNight(),
+      SetInitiative(playerId: 1),
+    ];
+    for (final event in events) {
+      notifier().dispatch(event);
+    }
+
+    // Independently fold the whole history minus its last event.
+    final history = session().history;
+    var expected = const GameState(players: [], startingLife: 20);
+    for (final event in history.sublist(0, history.length - 1)) {
+      expected = event.apply(expected);
+    }
+
+    notifier().undo();
+
+    expect(_snapshot(session().current), _snapshot(expected));
+  });
 }
+
+/// A deeply-comparable view of the observable game state, so two states can be
+/// checked for equality (neither [GameState] nor [PlayerState] defines `==`).
+Map<String, Object?> _snapshot(GameState s) => {
+  'monarch': s.monarchId,
+  'initiative': s.initiativeId,
+  'dayNight': s.dayNight,
+  'players': [
+    for (final p in s.players)
+      {
+        'id': p.id,
+        'life': p.life,
+        'poison': p.poison,
+        'energy': p.energy,
+        'experience': p.experience,
+        'commanderDamage': p.commanderDamage,
+        'counters': p.counters,
+      },
+  ],
+};
