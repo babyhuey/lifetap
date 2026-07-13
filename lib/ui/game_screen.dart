@@ -177,7 +177,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       child: _PlayerNameLabel(
                         name: players[i].name,
                         color: Color(players[i].color),
-                        onTap: () => _editName(players[i].id),
+                        onTap: () => _editName(players[i].id, turns[i]),
                       ),
                     ),
                   ),
@@ -265,15 +265,18 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     );
   }
 
-  /// Opens an upright (never seat-rotated) dialog to rename the player. Keeping
-  /// it screen-oriented — unlike the seat-rotated name label that opened it —
-  /// means the field and keyboard are easy to type on. Landscape stays locked
-  /// (set in main.dart); nothing here reorients when the field is focused.
-  Future<void> _editName(int playerId) async {
+  /// Opens the rename editor rotated to the player's seat facing
+  /// ([quarterTurns], the same as that seat's zone content), so the field and
+  /// live preview read right-side-up for that player — matching how their life
+  /// number faces them. The system keyboard stays upright (an OS constraint);
+  /// the editor is pinned to the top and lifted above the keyboard inset so the
+  /// rotated field stays visible for every seat rotation.
+  Future<void> _editName(int playerId, int quarterTurns) async {
     final current = ref.read(gameProvider).current.player(playerId).name;
     final name = await showDialog<String>(
       context: context,
-      builder: (context) => _NameEditDialog(initialName: current),
+      builder: (context) =>
+          _NameEditDialog(initialName: current, quarterTurns: quarterTurns),
     );
     if (name == null) return; // cancelled or dismissed by an outside tap
     final trimmed = name.trim();
@@ -951,14 +954,24 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
   }
 }
 
-/// Upright, screen-centered rename dialog. Held deliberately at the normal
-/// screen orientation (quarterTurns 0) — not rotated to the seat — with an
-/// autofocused field prefilled with the current name. Confirm pops the new
-/// name; an outside tap or Cancel pops null and leaves the name unchanged.
+/// Seat-rotated rename editor. The live name preview, the field, and the
+/// Cancel/Done buttons are wrapped in a [RotatedBox] of the player's seat
+/// [quarterTurns] so the whole editing surface faces that seat — the same way
+/// their life number does. The system keyboard itself stays upright (an OS
+/// constraint we don't fight); instead the panel is pinned to the top and
+/// lifted above the keyboard inset, and a [FittedBox] scales the (possibly
+/// sideways) panel down to whatever room is left, so the field stays visible
+/// and reachable for all four seat rotations. Autofocused and prefilled with
+/// the current name; Done/submit pops the new name, an outside tap or Cancel
+/// pops null and leaves the name unchanged.
 class _NameEditDialog extends StatefulWidget {
-  const _NameEditDialog({required this.initialName});
+  const _NameEditDialog({
+    required this.initialName,
+    required this.quarterTurns,
+  });
 
   final String initialName;
+  final int quarterTurns;
 
   @override
   State<_NameEditDialog> createState() => _NameEditDialogState();
@@ -979,23 +992,91 @@ class _NameEditDialogState extends State<_NameEditDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: LifeTapColors.surface,
-      title: const Text('Player name'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        textInputAction: TextInputAction.done,
-        decoration: const InputDecoration(labelText: 'Name'),
-        onSubmitted: (_) => _submit(),
+    // The keyboard rises from the bottom; drop its height from the usable area
+    // and keep the panel at the top so the rotated field is never occluded. The
+    // FittedBox then scales the panel down to fit whatever height is left, which
+    // matters most for the side seats (q1/q3) whose rotated panel is tallest.
+    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: keyboardInset),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Align(
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: constraints.maxWidth - 32,
+                  maxHeight: constraints.maxHeight - 32,
+                ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: RotatedBox(
+                    quarterTurns: widget.quarterTurns,
+                    child: SizedBox(width: 300, child: _panel()),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+    );
+  }
+
+  Widget _panel() {
+    return Material(
+      color: LifeTapColors.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Live preview of the typed name, facing the seat like the field.
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _controller,
+              builder: (context, value, _) {
+                final preview = value.text.trim();
+                return Text(
+                  preview.isEmpty ? 'Player name' : preview,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: LifeTapColors.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              textAlign: TextAlign.center,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(labelText: 'Name'),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(onPressed: _submit, child: const Text('Done')),
+              ],
+            ),
+          ],
         ),
-        FilledButton(onPressed: _submit, child: const Text('Done')),
-      ],
+      ),
     );
   }
 }
