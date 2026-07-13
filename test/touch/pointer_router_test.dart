@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -52,7 +51,8 @@ void main() {
       expect((results.single as TapResult).magnitude, 1);
     });
 
-    test('two-finger simultaneous tap yields a single magnitude 5', () {
+    test('two-finger simultaneous tap still yields a single ±1 (no magnitude '
+        'from finger count)', () {
       final results = <PointerResult>[];
       final router = PointerRouter(
         zones: const [_zone0, _zone1],
@@ -65,10 +65,10 @@ void main() {
       router.up(2, heldFor: _short);
 
       expect(results, hasLength(1));
-      expect((results.single as TapResult).magnitude, 5);
+      expect((results.single as TapResult).magnitude, 1);
     });
 
-    test('three-finger simultaneous tap yields a single magnitude 10', () {
+    test('three-finger simultaneous tap still yields a single ±1', () {
       final results = <PointerResult>[];
       final router = PointerRouter(
         zones: const [_zone0, _zone1],
@@ -83,7 +83,7 @@ void main() {
       router.up(3, heldFor: _short);
 
       expect(results, hasLength(1));
-      expect((results.single as TapResult).magnitude, 10);
+      expect((results.single as TapResult).magnitude, 1);
     });
 
     test('right-half tap is positive, left-half tap is negative', () {
@@ -185,24 +185,86 @@ void main() {
     });
   });
 
-  group('PointerRouter drag', () {
-    test('a vertical drag yields a ScrubResult, not a tap', () {
+  group('PointerRouter swipe (horizontal ±10, once)', () {
+    test('a rightward drag past threshold emits one +10 (q0)', () {
       final results = <PointerResult>[];
       final router = PointerRouter(
         zones: const [_zone0, _zone1],
         onResult: results.add,
       );
 
-      router.down(1, const Offset(50, 90));
-      router.move(1, const Offset(50, 40));
-      router.move(1, const Offset(50, 10)); // dragged up ~80px
-      router.up(1, heldFor: const Duration(milliseconds: 300));
+      router.down(1, const Offset(20, 50));
+      router.move(1, const Offset(60, 50));
+      router.move(1, const Offset(90, 50)); // ~70px right, past the swipe slop
+      router.up(1, heldFor: const Duration(milliseconds: 200));
 
       expect(results, hasLength(1));
-      expect(results.single, isA<ScrubResult>());
-      final scrub = results.single as ScrubResult;
-      expect(scrub.zoneId, 0);
-      expect(scrub.steps, greaterThan(0), reason: 'dragging up increases');
+      final swipe = results.single as SwipeResult;
+      expect(swipe.zoneId, 0);
+      expect(swipe.magnitude, 10, reason: 'rightward on a q0 seat is +10');
+    });
+
+    test('a leftward drag past threshold emits one −10 (q0)', () {
+      final results = <PointerResult>[];
+      final router = PointerRouter(
+        zones: const [_zone0, _zone1],
+        onResult: results.add,
+      );
+
+      router.down(1, const Offset(80, 50));
+      router.move(1, const Offset(10, 50)); // ~70px left
+      router.up(1, heldFor: const Duration(milliseconds: 200));
+
+      expect(results, hasLength(1));
+      expect((results.single as SwipeResult).magnitude, -10);
+    });
+
+    test('a rotated seat swipes along its own left/right axis (q1: right is '
+        'the screen bottom)', () {
+      final results = <PointerResult>[];
+      final router = PointerRouter(
+        zones: const [_zone0],
+        zoneTurns: const [1],
+        onResult: results.add,
+      );
+
+      // A q1 seat faces right, so the player's own right is the screen's DOWN.
+      router.down(1, const Offset(50, 20));
+      router.move(1, const Offset(50, 90)); // screen-down = this seat's right
+      router.up(1, heldFor: const Duration(milliseconds: 200));
+
+      expect(results, hasLength(1));
+      expect((results.single as SwipeResult).magnitude, 10);
+    });
+
+    test('a vertical drag emits no life change (up/down does nothing)', () {
+      final results = <PointerResult>[];
+      final router = PointerRouter(
+        zones: const [_zone0],
+        onResult: results.add,
+      );
+
+      router.down(1, const Offset(50, 90));
+      router.move(1, const Offset(50, 40));
+      router.move(1, const Offset(50, 10)); // ~80px vertical, no horizontal
+      router.up(1, heldFor: const Duration(milliseconds: 300));
+
+      expect(results, isEmpty);
+    });
+
+    test('a swipe suppresses the would-be tap on release', () {
+      final results = <PointerResult>[];
+      final router = PointerRouter(
+        zones: const [_zone0],
+        onResult: results.add,
+      );
+
+      router.down(1, const Offset(20, 50));
+      router.move(1, const Offset(90, 50));
+      router.up(1, heldFor: _short);
+
+      expect(results, hasLength(1), reason: 'only the ±10 swipe, no extra tap');
+      expect(results.single, isA<SwipeResult>());
     });
   });
 
@@ -253,37 +315,37 @@ void main() {
     });
 
     test(
-      'held pointer accelerates: steps grow and cumulative change climbs',
+      'held pointer repeats ±1 at an accelerating rate; the step never grows',
       () {
         var now = Duration.zero;
         final (:router, :results) = makeRouter(() => now);
 
         router.down(1, _zone0Right);
 
-        // Poll on a fine cadence, as the UI's periodic ticker does, for ~2s.
-        final steps = <int>[];
+        // Poll on a fine cadence, as the UI's periodic ticker does, for ~2s,
+        // counting repeats landing in the first vs the second half of the hold.
+        var early = 0; // repeats with now < 1000ms
+        var late = 0; //  repeats with now >= 1000ms
         for (var ms = 20; ms <= 2000; ms += 20) {
           now = Duration(milliseconds: ms);
           final before = results.length;
           router.tick();
           for (var i = before; i < results.length; i++) {
-            steps.add((results[i] as TapResult).magnitude);
+            final m = (results[i] as TapResult).magnitude;
+            expect(m, 1, reason: 'every hold repeat is exactly +1, never more');
+            if (ms < 1000) {
+              early++;
+            } else {
+              late++;
+            }
           }
         }
 
-        expect(steps.every((m) => m > 0), isTrue, reason: 'right half is +');
-        expect(steps.first, 1, reason: 'first repeat is the smallest step');
-        expect(steps.reduce(max), 10, reason: 'ramps up to the ±10 ceiling');
+        expect(early, greaterThan(0), reason: 'repeats begin after threshold');
         expect(
-          steps.last,
-          greaterThan(steps.first),
-          reason: 'steps get bigger the longer it holds',
-        );
-        final total = steps.fold<int>(0, (a, b) => a + b);
-        expect(
-          total,
-          greaterThan(steps.first),
-          reason: 'cumulative change grows',
+          late,
+          greaterThan(early),
+          reason: 'more ±1s land later — the repeat rate accelerates',
         );
       },
     );
