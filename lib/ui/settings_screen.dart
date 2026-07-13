@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/commander_art.dart';
 import '../game/game_notifier.dart';
 import 'theme.dart';
 
@@ -71,6 +73,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late int _count;
   late int _life;
 
+  /// True while a "download for offline" pass is running, so the row is
+  /// disabled and shows a spinner (guards against a double tap).
+  bool _downloading = false;
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +90,49 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _start() {
     ref.read(gameProvider.notifier).newGame(_count, _life);
     if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+  }
+
+  /// Pre-fetches art for every commander in the current game so their zones
+  /// show with no network later: resolves each name (populating the name→URL
+  /// cache) and downloads the image into the shared disk cache.
+  Future<void> _downloadOfflineArt() async {
+    if (_downloading) return;
+    setState(() => _downloading = true);
+    final messenger = ScaffoldMessenger.of(context);
+    final source = ref.read(commanderArtSourceProvider);
+    final names = [
+      for (final p in ref.read(gameProvider).current.players)
+        if ((p.commanderName ?? '').trim().isNotEmpty) p.commanderName!,
+    ];
+
+    final cacheManager = DefaultCacheManager();
+    var cached = 0;
+    var failed = 0;
+    for (final name in names) {
+      try {
+        final url = await source.artUrl(name);
+        if (url == null) {
+          failed++;
+          continue;
+        }
+        await cacheManager.downloadFile(url);
+        cached++;
+      } catch (_) {
+        failed++;
+      }
+    }
+
+    if (!mounted) return;
+    setState(() => _downloading = false);
+    final String message;
+    if (names.isEmpty) {
+      message = 'Nothing to download';
+    } else if (failed == 0) {
+      message = 'Cached art for $cached commander${cached == 1 ? '' : 's'}';
+    } else {
+      message = 'Cached art for $cached, $failed failed';
+    }
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -166,6 +215,41 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               label: 'Auto-KO',
               value: settings.autoKo,
               onChanged: ref.read(settingsProvider.notifier).setAutoKo,
+            ),
+            const SizedBox(height: 32),
+            const _SectionHeader('Offline'),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              onTap: _downloading ? null : _downloadOfflineArt,
+              leading: const Icon(
+                Icons.download_for_offline_outlined,
+                color: LifeTapColors.accent,
+              ),
+              title: const Text(
+                'Download commander art for offline',
+                style: TextStyle(
+                  color: LifeTapColors.textPrimary,
+                  fontSize: 15,
+                ),
+              ),
+              subtitle: const Text(
+                "Pre-fetch this game's commander art so zones show with no "
+                'network.',
+                style: TextStyle(
+                  color: LifeTapColors.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+              trailing: _downloading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: LifeTapColors.accent,
+                      ),
+                    )
+                  : null,
             ),
           ],
         ),

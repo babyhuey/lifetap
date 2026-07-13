@@ -79,4 +79,27 @@ void main() {
 
     expect(container.read(settingsProvider).inAppKeyboard, isFalse);
   });
+
+  testWidgets('the offline-download row reports "Nothing to download" when no '
+      'commander is set', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: SettingsScreen()),
+      ),
+    );
+    await tester.pump();
+
+    // The default game has players but no commander names, so there is nothing
+    // to pre-fetch — this path touches neither the network nor the disk cache.
+    final row = find.text('Download commander art for offline');
+    await tester.scrollUntilVisible(row, 120);
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nothing to download'), findsOneWidget);
+  });
 }
