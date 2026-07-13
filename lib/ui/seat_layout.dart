@@ -11,7 +11,10 @@ List<int> seatQuarterTurns(int playerCount) {
     case 3:
       return const [1, 3, 0]; // left edge, right edge, bottom
     case 4:
-      return const [2, 2, 0, 0]; // 2x2: top row faces down, bottom row up
+      // 2x2 [TL, TR, BL, BR]: the left column reads from the left side (q1) and
+      // the right column reads from the right side (q3), so each player faces a
+      // side edge rather than the top/bottom.
+      return const [1, 3, 1, 3];
     case 5:
       return const [2, 2, 0, 0, 3]; // 2 top, 2 bottom, 1 on the right side
     case 6:

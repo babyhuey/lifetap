@@ -6,7 +6,7 @@ void main() {
     test('returns the documented facing for each player count 2..6', () {
       expect(seatQuarterTurns(2), [2, 0]);
       expect(seatQuarterTurns(3), [1, 3, 0]);
-      expect(seatQuarterTurns(4), [2, 2, 0, 0]);
+      expect(seatQuarterTurns(4), [1, 3, 1, 3]);
       expect(seatQuarterTurns(5), [2, 2, 0, 0, 3]);
       expect(seatQuarterTurns(6), [2, 2, 2, 0, 0, 0]);
     });
