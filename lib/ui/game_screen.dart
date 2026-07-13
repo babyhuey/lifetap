@@ -178,6 +178,30 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                     ),
                   ),
                 ),
+              // The commander-damage strip also sits above the Listener so its
+              // chips adjust commander damage instead of routing a life tap;
+              // like the gear/name only each chip's hit area is consumed, the
+              // rest of the cell falls through to the router.
+              for (var i = 0; i < players.length; i++)
+                Positioned.fromRect(
+                  rect: rects[i],
+                  child: RotatedBox(
+                    quarterTurns: turns[i],
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _CommanderDamageStrip(
+                          player: players[i],
+                          opponents: [
+                            for (final p in players)
+                              if (p.id != players[i].id) p,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               Positioned.fromRect(
                 rect: layout.toolbar,
                 child: _Toolbar(
@@ -463,7 +487,9 @@ class _ZoneContent extends StatelessWidget {
             Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 10),
+                // Raised above the commander-damage strip that the overlay
+                // layer pins to the player-facing bottom edge.
+                padding: const EdgeInsets.only(bottom: 46),
                 child: _CounterChips(player: player),
               ),
             ),
@@ -475,7 +501,8 @@ class _ZoneContent extends StatelessWidget {
 }
 
 /// A compact wrap of small rounded chips for the player's non-zero secondary
-/// counters and commander-damage entries. Shows nothing when all are zero.
+/// counters (poison, energy, experience). Commander damage has its own
+/// per-opponent strip. Shows nothing when all are zero.
 class _CounterChips extends StatelessWidget {
   const _CounterChips({required this.player});
 
@@ -502,13 +529,6 @@ class _CounterChips extends StatelessWidget {
           value: player.experience,
           color: LifeTapColors.accent,
         ),
-      for (final dmg in player.commanderDamage.entries)
-        if (dmg.value > 0)
-          _CounterChip(
-            icon: Icons.shield,
-            value: dmg.value,
-            color: LifeTapColors.accent,
-          ),
     ];
     if (chips.isEmpty) return const SizedBox.shrink();
     return Wrap(spacing: 6, runSpacing: 6, children: chips);
@@ -548,6 +568,116 @@ class _CounterChip extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The per-opponent commander-damage strip pinned to a zone's player-facing
+/// edge: a shield header plus one chip per opponent showing the damage THIS
+/// player has taken from that opponent's commander. Tapping a chip adds one
+/// (dispatching [AdjustCommanderDamage] with the current life-loss setting);
+/// long-press removes one (clamped at 0, so disabled when already 0). A chip at
+/// 21+ — lethal — flags red.
+class _CommanderDamageStrip extends ConsumerWidget {
+  const _CommanderDamageStrip({required this.player, required this.opponents});
+
+  final PlayerState player;
+  final List<PlayerState> opponents;
+
+  void _adjust(WidgetRef ref, int fromPlayerId, int delta) {
+    final reduceLife = ref.read(settingsProvider).commanderDamageLifeLoss;
+    ref
+        .read(gameProvider.notifier)
+        .dispatch(
+          AdjustCommanderDamage(
+            playerId: player.id,
+            fromPlayerId: fromPlayerId,
+            delta: delta,
+            reduceLife: reduceLife,
+          ),
+        );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(right: 2),
+          child: Icon(Icons.shield, size: 15, color: Colors.white54),
+        ),
+        for (final opp in opponents)
+          _CommanderDamageChip(
+            key: ValueKey('cmdr-${player.id}-${opp.id}'),
+            color: Color(opp.color),
+            value: player.commanderDamage[opp.id] ?? 0,
+            onTap: () => _adjust(ref, opp.id, 1),
+            onDecrement: (player.commanderDamage[opp.id] ?? 0) > 0
+                ? () => _adjust(ref, opp.id, -1)
+                : null,
+          ),
+      ],
+    );
+  }
+}
+
+/// One opponent's commander-damage chip: a dot in the opponent's color and the
+/// damage taken from them. Opaque so its tap is consumed by this overlay rather
+/// than falling through to the life router below.
+class _CommanderDamageChip extends StatelessWidget {
+  const _CommanderDamageChip({
+    super.key,
+    required this.color,
+    required this.value,
+    required this.onTap,
+    required this.onDecrement,
+  });
+
+  final Color color;
+  final int value;
+  final VoidCallback onTap;
+  final VoidCallback? onDecrement;
+
+  @override
+  Widget build(BuildContext context) {
+    final lethal = value >= 21;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      onLongPress: onDecrement,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: lethal
+              ? LifeTapColors.negative.withValues(alpha: 0.85)
+              : LifeTapColors.chip,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color, width: 1.5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              '$value',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

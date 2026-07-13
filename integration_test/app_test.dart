@@ -17,7 +17,7 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: LifeTapApp()));
     await tester.pump();
 
-    expect(find.text('20'), findsNWidgets(4));
+    expect(find.text('40'), findsNWidgets(4));
 
     // Player 0's top-left zone spans x 0..400 and is an upside-down top seat
     // (quarterTurns 2), so that player's right is the screen's LEFT. A quick
@@ -26,7 +26,7 @@ void main() {
     await gesture.up();
     await tester.pump();
 
-    expect(find.text('21'), findsOneWidget);
-    expect(find.text('20'), findsNWidgets(3));
+    expect(find.text('41'), findsOneWidget);
+    expect(find.text('40'), findsNWidgets(3));
   });
 }

@@ -95,18 +95,22 @@ class AdjustCounter extends GameEvent {
   }
 }
 
-/// Records commander damage dealt to [playerId] by [fromPlayerId]'s commander
-/// and applies the matching life loss (life is reduced by [delta]).
+/// Records commander damage dealt to [playerId] by [fromPlayerId]'s commander.
+/// When [reduceLife] is true (the default rule) it also subtracts [delta] from
+/// the receiving player's life; when false only the counter changes, so the
+/// "Commander damage life loss" setting can turn the life side off.
 class AdjustCommanderDamage extends GameEvent {
   const AdjustCommanderDamage({
     required this.playerId,
     required this.fromPlayerId,
     required this.delta,
+    this.reduceLife = true,
   });
 
   final int playerId;
   final int fromPlayerId;
   final int delta;
+  final bool reduceLife;
 
   @override
   GameState apply(GameState state) {
@@ -118,7 +122,7 @@ class AdjustCommanderDamage extends GameEvent {
         ...p.commanderDamage,
         fromPlayerId: next < 0 ? 0 : next,
       },
-      life: p.life - delta,
+      life: reduceLife ? p.life - delta : p.life,
     );
     return state.replacePlayer(updated);
   }

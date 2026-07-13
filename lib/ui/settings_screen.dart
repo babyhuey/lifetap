@@ -63,7 +63,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _count = current.playerCount;
     _life = startingLifeOptions.contains(current.startingLife)
         ? current.startingLife
-        : 20;
+        : 40;
   }
 
   void _start() {

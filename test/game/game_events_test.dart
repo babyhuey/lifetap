@@ -109,6 +109,23 @@ void main() {
       expect(state.player(0).commanderDamage[1], 20);
       expect(state.player(0).isDead, isFalse);
     });
+
+    test('reduceLife:false records damage without touching life', () {
+      var state = _newGame(life: 40);
+      state = AdjustCommanderDamage(
+        playerId: 0,
+        fromPlayerId: 1,
+        delta: 5,
+        reduceLife: false,
+      ).apply(state);
+
+      expect(state.player(0).commanderDamage[1], 5);
+      expect(
+        state.player(0).life,
+        40,
+        reason: 'life is unchanged when reduceLife is false',
+      );
+    });
   });
 
   group('rename and recolor', () {
