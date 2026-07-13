@@ -17,6 +17,7 @@ class PlayerState {
     this.energy = 0,
     this.experience = 0,
     this.commanderDamage = const {},
+    this.counters = const {},
     this.commanderName,
     this.artUrl,
   });
@@ -31,6 +32,11 @@ class PlayerState {
 
   /// Damage taken from each opponent's commander, keyed by opponent id.
   final Map<int, int> commanderDamage;
+
+  /// Generic named increment counters (Treasure, Storm, Rad, …), keyed by
+  /// counter name. Separate from the fixed poison/energy/experience fields so
+  /// arbitrary counters can be added without new state fields.
+  final Map<String, int> counters;
 
   /// The player's commander card name, or null if none has been set.
   final String? commanderName;
@@ -58,6 +64,7 @@ class PlayerState {
     int? energy,
     int? experience,
     Map<int, int>? commanderDamage,
+    Map<String, int>? counters,
     Object? commanderName = _unset,
     Object? artUrl = _unset,
   }) {
@@ -70,6 +77,7 @@ class PlayerState {
       energy: energy ?? this.energy,
       experience: experience ?? this.experience,
       commanderDamage: commanderDamage ?? this.commanderDamage,
+      counters: counters ?? this.counters,
       commanderName: identical(commanderName, _unset)
           ? this.commanderName
           : commanderName as String?,

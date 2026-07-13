@@ -163,6 +163,27 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                     ),
                   ),
                 ),
+              // The counters affordance sits above the Listener at the seat's
+              // top-inner corner so tapping it opens the counters popup instead
+              // of routing a life tap; only its hit area is consumed.
+              for (var i = 0; i < players.length; i++)
+                Positioned.fromRect(
+                  rect: rects[i],
+                  child: RotatedBox(
+                    quarterTurns: turns[i],
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: IconButton(
+                        key: ValueKey('counters-${players[i].id}'),
+                        tooltip: 'Counters',
+                        color: Colors.white70,
+                        iconSize: 20,
+                        icon: const Icon(Icons.grid_view),
+                        onPressed: () => _showCounters(players[i].id, turns[i]),
+                      ),
+                    ),
+                  ),
+                ),
               // Name labels also sit above the Listener so tapping a name opens
               // the rename editor instead of the router reading it as a life
               // tap. Only the label's hit area is consumed; the rest of the
@@ -265,6 +286,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     );
   }
 
+  /// Opens the seat-rotated counters popup: the fuller management view for this
+  /// player's poison/energy/experience and generic named counters.
+  Future<void> _showCounters(int playerId, int quarterTurns) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) =>
+          _CountersPopup(playerId: playerId, quarterTurns: quarterTurns),
+    );
+  }
+
   /// Opens the rename editor rotated to the player's seat facing
   /// ([quarterTurns], the same as that seat's zone content), so the field and
   /// live preview read right-side-up for that player — matching how their life
@@ -356,6 +387,15 @@ bool _knockedOut(PlayerState player, GameSettings settings) {
   return player.life <= 0 || player.poison >= 10 || cmdrLethal;
 }
 
+/// Luminance-weighted saturation matrix that maps every color to its grey
+/// value; used to desaturate a knocked-out zone's art.
+const List<double> _greyscaleMatrix = <double>[
+  0.2126, 0.7152, 0.0722, 0, 0, //
+  0.2126, 0.7152, 0.0722, 0, 0, //
+  0.2126, 0.7152, 0.0722, 0, 0, //
+  0, 0, 0, 1, 0, //
+];
+
 class _PlayerZone extends ConsumerWidget {
   const _PlayerZone({required this.player, required this.quarterTurns});
 
@@ -370,6 +410,26 @@ class _PlayerZone extends ConsumerWidget {
     final base = Color(player.color);
     final solid = Color.lerp(base, Colors.black, 0.6)!;
     final art = player.artUrl;
+
+    Widget? artLayer;
+    if (art != null) {
+      // Falls back to the solid color while loading or on any error, so a
+      // missing/broken image never leaves the zone blank.
+      artLayer = Image.network(
+        art,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stack) => ColoredBox(color: solid),
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : ColoredBox(color: solid),
+      );
+      // Knocked out: drain the art's color so the zone reads as out.
+      if (ko) {
+        artLayer = ColorFiltered(
+          colorFilter: const ColorFilter.matrix(_greyscaleMatrix),
+          child: artLayer,
+        );
+      }
+    }
 
     return DecoratedBox(
       // Without art the zone reads near-black and uses the player's color only
@@ -386,16 +446,8 @@ class _PlayerZone extends ConsumerWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (art != null) ...[
-            // Falls back to the solid color while loading or on any error, so a
-            // missing/broken image never leaves the zone blank.
-            Image.network(
-              art,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stack) => ColoredBox(color: solid),
-              loadingBuilder: (context, child, progress) =>
-                  progress == null ? child : ColoredBox(color: solid),
-            ),
+          if (artLayer != null) ...[
+            artLayer,
             // Scrim so the white life number and name stay legible over art.
             DecoratedBox(
               decoration: BoxDecoration(
@@ -410,6 +462,9 @@ class _PlayerZone extends ConsumerWidget {
               ),
             ),
           ],
+          // Knocked out: a dark overlay dims the whole zone (over the art/color
+          // background, under the seat-rotated KO mark) so a dead seat reads out.
+          if (ko) const ColoredBox(color: Color(0x8C000000)),
           // The ± hints and the life number share one rotated frame so they
           // read from the player's seat: "−" lands on the player's actual left
           // and "+" on their right, matching the router's per-seat tap sign.
@@ -542,24 +597,26 @@ class _ZoneContent extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: Text(
-                    '${player.life}',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: fontSize,
-                      fontWeight: FontWeight.w800,
-                      decoration: knockedOut
-                          ? TextDecoration.lineThrough
-                          : TextDecoration.none,
-                      shadows: const [
-                        Shadow(
-                          color: Colors.black,
-                          blurRadius: 8,
-                          offset: Offset(0, 2),
+                  // Knocked out: the big life number is replaced by the skull +
+                  // "KO" mark, which shares this seat-rotated frame so it faces
+                  // the player like the number did.
+                  child: knockedOut
+                      ? const _KnockedOutMark()
+                      : Text(
+                          '${player.life}',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: fontSize,
+                            fontWeight: FontWeight.w800,
+                            shadows: const [
+                              Shadow(
+                                color: Colors.black,
+                                blurRadius: 8,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
-                  ),
                 ),
               ),
             ),
@@ -569,7 +626,12 @@ class _ZoneContent extends StatelessWidget {
                 // Raised above the commander-damage strip that the overlay
                 // layer pins to the player-facing bottom edge.
                 padding: const EdgeInsets.only(bottom: 46),
-                child: _CounterChips(player: player),
+                child: knockedOut
+                    ? Opacity(
+                        opacity: 0.5,
+                        child: _CounterChips(player: player),
+                      )
+                    : _CounterChips(player: player),
               ),
             ),
           ],
@@ -579,9 +641,46 @@ class _ZoneContent extends StatelessWidget {
   }
 }
 
+/// The knocked-out mark shown in place of a dead player's life number: a large
+/// skull glyph over the word "KO". Rendered inside the zone's seat-rotated frame
+/// so it faces the player, and inside a [FittedBox] so it scales to the zone.
+class _KnockedOutMark extends StatelessWidget {
+  const _KnockedOutMark();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '💀',
+          style: TextStyle(
+            fontSize: 120,
+            shadows: [
+              Shadow(color: Colors.black, blurRadius: 8, offset: Offset(0, 2)),
+            ],
+          ),
+        ),
+        Text(
+          'KO',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 48,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 3,
+            shadows: [
+              Shadow(color: Colors.black, blurRadius: 8, offset: Offset(0, 2)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// A compact wrap of small rounded chips for the player's non-zero secondary
-/// counters (poison, energy, experience). Commander damage has its own
-/// per-opponent strip. Shows nothing when all are zero.
+/// counters (poison, energy, experience, and generic named counters). Commander
+/// damage has its own per-opponent strip. Shows nothing when all are zero.
 class _CounterChips extends StatelessWidget {
   const _CounterChips({required this.player});
 
@@ -608,6 +707,13 @@ class _CounterChips extends StatelessWidget {
           value: player.experience,
           color: LifeTapColors.accent,
         ),
+      for (final type in _genericCounterTypes)
+        if ((player.counters[type.label] ?? 0) > 0)
+          _CounterChip(
+            icon: type.icon,
+            value: player.counters[type.label]!,
+            color: LifeTapColors.accent,
+          ),
     ];
     if (chips.isEmpty) return const SizedBox.shrink();
     return Wrap(spacing: 6, runSpacing: 6, children: chips);
@@ -1403,6 +1509,370 @@ class _HistoryTile extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// A counter type offered in the counters popup. A non-null [mode] means one of
+/// the fixed poison/energy/experience counters; a null [mode] means a generic
+/// named counter stored in [PlayerState.counters] keyed by [label].
+class _CounterTypeDef {
+  const _CounterTypeDef({required this.label, required this.icon, this.mode});
+
+  final String label;
+  final IconData icon;
+  final CounterMode? mode;
+}
+
+const List<_CounterTypeDef> _standardCounterTypes = [
+  _CounterTypeDef(
+    label: 'Poison',
+    icon: Icons.water_drop,
+    mode: CounterMode.poison,
+  ),
+  _CounterTypeDef(label: 'Energy', icon: Icons.bolt, mode: CounterMode.energy),
+  _CounterTypeDef(
+    label: 'Experience',
+    icon: Icons.auto_awesome,
+    mode: CounterMode.experience,
+  ),
+];
+
+/// Generic increment counters. The special single-holder/global counters
+/// (Monarch, Initiative, Day/night) and KO-as-counter are deliberately out of
+/// this pass — they need extra ownership logic.
+const List<_CounterTypeDef> _genericCounterTypes = [
+  _CounterTypeDef(label: 'Treasure', icon: Icons.savings),
+  _CounterTypeDef(label: 'Storm', icon: Icons.cyclone),
+  _CounterTypeDef(label: 'Rad', icon: Icons.radar),
+];
+
+/// The bright-surface palette for the counters popup, which deliberately breaks
+/// from the app's dark theme to match the reference's light modal.
+abstract final class _PopupColors {
+  static const surface = Color(0xFFEDEFF2);
+  static const tile = Color(0xFFFFFFFF);
+  static const tileBorder = Color(0xFFD5D9E0);
+  static const textPrimary = Color(0xFF1B1F24);
+  static const textSecondary = Color(0xFF5C6470);
+}
+
+enum _CounterTab { player, counters }
+
+/// The seat-rotated counters popup: a light rounded modal with a Player/Counters
+/// toggle, a grid of counter-type tiles to add counters, and the player's active
+/// counters as larger tap-to-increment tiles. Tapping a tile adds +1 (creating a
+/// generic counter on first touch); holding an active tile removes one (clamped
+/// at 0). Every change dispatches through the notifier so undo/history stay
+/// correct. Commander damage keeps its own per-zone grid and is not duplicated
+/// here.
+class _CountersPopup extends ConsumerStatefulWidget {
+  const _CountersPopup({required this.playerId, required this.quarterTurns});
+
+  final int playerId;
+  final int quarterTurns;
+
+  @override
+  ConsumerState<_CountersPopup> createState() => _CountersPopupState();
+}
+
+class _CountersPopupState extends ConsumerState<_CountersPopup> {
+  _CounterTab _tab = _CounterTab.counters;
+
+  void _bump(_CounterTypeDef type, int delta) {
+    final notifier = ref.read(gameProvider.notifier);
+    final mode = type.mode;
+    if (mode != null) {
+      notifier.dispatch(
+        AdjustCounter(playerId: widget.playerId, mode: mode, delta: delta),
+      );
+    } else {
+      notifier.dispatch(
+        AdjustNamedCounter(
+          playerId: widget.playerId,
+          name: type.label,
+          delta: delta,
+        ),
+      );
+    }
+  }
+
+  int _value(_CounterTypeDef type, PlayerState player) {
+    final mode = type.mode;
+    return mode != null
+        ? player.counter(mode)
+        : (player.counters[type.label] ?? 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final player = ref.watch(gameProvider).current.player(widget.playerId);
+    return Center(
+      child: RotatedBox(
+        quarterTurns: widget.quarterTurns,
+        child: Material(
+          color: Colors.transparent,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 340, maxHeight: 520),
+            child: Container(
+              decoration: BoxDecoration(
+                color: _PopupColors.surface,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _header(),
+                  const SizedBox(height: 12),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: _tab == _CounterTab.counters
+                          ? _countersBody(player)
+                          : _playerBody(player),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Tap to increment. Hold for additional options.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: _PopupColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _header() {
+    return Row(
+      children: [
+        // Scales down rather than overflowing when the seat rotation leaves the
+        // modal narrow.
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: _segmentedToggle(),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Close',
+          color: _PopupColors.textSecondary,
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ],
+    );
+  }
+
+  Widget _segmentedToggle() {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: _PopupColors.tile,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _PopupColors.tileBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _segButton('Player', _CounterTab.player),
+          _segButton('Counters', _CounterTab.counters),
+        ],
+      ),
+    );
+  }
+
+  Widget _segButton(String label, _CounterTab tab) {
+    final selected = _tab == tab;
+    return GestureDetector(
+      onTap: () => setState(() => _tab = tab),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? LifeTapColors.accent : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : _PopupColors.textPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _countersBody(PlayerState player) {
+    final all = [..._standardCounterTypes, ..._genericCounterTypes];
+    final active = [
+      for (final t in all)
+        if (_value(t, player) > 0) t,
+    ];
+    final inactive = [
+      for (final t in all)
+        if (_value(t, player) == 0) t,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (active.isNotEmpty) ...[
+          _sectionLabel('Active'),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final t in active) _activeTile(t, _value(t, player)),
+            ],
+          ),
+          const SizedBox(height: 18),
+        ],
+        _sectionLabel('Add counter'),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [for (final t in inactive) _paletteTile(t)],
+        ),
+      ],
+    );
+  }
+
+  Widget _sectionLabel(String text) {
+    return Text(
+      text,
+      style: const TextStyle(
+        color: _PopupColors.textSecondary,
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.5,
+      ),
+    );
+  }
+
+  Widget _paletteTile(_CounterTypeDef type) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _bump(type, 1),
+      child: Container(
+        width: 92,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        decoration: BoxDecoration(
+          color: _PopupColors.tile,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _PopupColors.tileBorder),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(type.icon, color: _PopupColors.textPrimary, size: 24),
+            const SizedBox(height: 6),
+            Text(
+              type.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: _PopupColors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _activeTile(_CounterTypeDef type, int value) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _bump(type, 1),
+      onLongPress: () => _bump(type, -1),
+      child: Container(
+        width: 100,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        decoration: BoxDecoration(
+          color: LifeTapColors.accent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(type.icon, color: Colors.white, size: 22),
+            const SizedBox(height: 2),
+            Text(
+              '$value',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            Text(
+              type.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _playerBody(PlayerState player) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Color(player.color),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              player.name,
+              style: const TextStyle(
+                color: _PopupColors.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'Life ${player.life}',
+          style: const TextStyle(
+            color: _PopupColors.textSecondary,
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Use the gear icon on the zone to rename or recolor.',
+          style: TextStyle(color: _PopupColors.textSecondary, fontSize: 13),
+        ),
+      ],
     );
   }
 }

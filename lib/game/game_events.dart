@@ -95,6 +95,38 @@ class AdjustCounter extends GameEvent {
   }
 }
 
+/// Adjusts one of a player's generic named counters (Treasure, Storm, Rad, …),
+/// creating the entry on first touch. Clamped to 0..999, like the other
+/// secondary counters.
+class AdjustNamedCounter extends GameEvent {
+  const AdjustNamedCounter({
+    required this.playerId,
+    required this.name,
+    required this.delta,
+  });
+
+  final int playerId;
+  final String name;
+  final int delta;
+
+  @override
+  GameState apply(GameState state) {
+    final p = state.player(playerId);
+    final current = p.counters[name] ?? 0;
+    final updated = p.copyWith(
+      counters: {...p.counters, name: _clampCounter(current + delta)},
+    );
+    return state.replacePlayer(updated);
+  }
+
+  @override
+  String describe(GameState before) {
+    final p = before.player(playerId);
+    final sign = delta >= 0 ? '+' : '';
+    return '${p.name} $name $sign$delta';
+  }
+}
+
 /// Records commander damage dealt to [playerId] by [fromPlayerId]'s commander.
 /// When [reduceLife] is true (the default rule) it also subtracts [delta] from
 /// the receiving player's life; when false only the counter changes, so the
