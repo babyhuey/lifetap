@@ -68,7 +68,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final playerId = session.current.players[result.zoneId].id;
     final delta = switch (result) {
       TapResult(:final magnitude) => magnitude,
-      ScrubResult(:final steps) => steps,
+      SwipeResult(:final magnitude) => magnitude,
     };
     ref
         .read(gameProvider.notifier)
@@ -649,11 +649,12 @@ class _CounterChip extends StatelessWidget {
   }
 }
 
-/// The per-opponent commander-damage strip pinned to a zone's player-facing
-/// edge: a shield header plus one chip per opponent showing the damage THIS
-/// player has taken from that opponent's commander. Tapping a chip adds one
+/// The per-opponent commander-damage grid pinned to a zone's player-facing
+/// edge: a compact two-column grid of small cells, one per opponent, each
+/// showing a shield icon tinted in that opponent's color and the damage THIS
+/// player has taken from their commander (default 0). Tapping a cell adds one
 /// (dispatching [AdjustCommanderDamage] with the current life-loss setting);
-/// long-press removes one (clamped at 0, so disabled when already 0). A chip at
+/// long-press removes one (clamped at 0, so disabled when already 0). A cell at
 /// 21+ — lethal — flags red.
 class _CommanderDamageStrip extends ConsumerWidget {
   const _CommanderDamageStrip({required this.player, required this.opponents});
@@ -677,36 +678,48 @@ class _CommanderDamageStrip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Wrap(
-      alignment: WrapAlignment.center,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 6,
-      runSpacing: 6,
-      children: [
-        const Padding(
-          padding: EdgeInsets.only(right: 2),
-          child: Icon(Icons.shield, size: 15, color: Colors.white54),
+    final cells = [
+      for (final opp in opponents)
+        _CommanderDamageCell(
+          key: ValueKey('cmdr-${player.id}-${opp.id}'),
+          color: Color(opp.color),
+          value: player.commanderDamage[opp.id] ?? 0,
+          onTap: () => _adjust(ref, opp.id, 1),
+          onDecrement: (player.commanderDamage[opp.id] ?? 0) > 0
+              ? () => _adjust(ref, opp.id, -1)
+              : null,
         ),
-        for (final opp in opponents)
-          _CommanderDamageChip(
-            key: ValueKey('cmdr-${player.id}-${opp.id}'),
-            color: Color(opp.color),
-            value: player.commanderDamage[opp.id] ?? 0,
-            onTap: () => _adjust(ref, opp.id, 1),
-            onDecrement: (player.commanderDamage[opp.id] ?? 0) > 0
-                ? () => _adjust(ref, opp.id, -1)
-                : null,
+    ];
+    // Two-column grid: rows of two, the last row left-aligned when the opponent
+    // count is odd. Sized to its cells (mainAxisSize.min) so it sits
+    // unobtrusively on the zone edge.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < cells.length; i += 2) ...[
+          if (i > 0) const SizedBox(height: 6),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              cells[i],
+              if (i + 1 < cells.length) ...[
+                const SizedBox(width: 6),
+                cells[i + 1],
+              ],
+            ],
           ),
+        ],
       ],
     );
   }
 }
 
-/// One opponent's commander-damage chip: a dot in the opponent's color and the
+/// One opponent's commander-damage cell: a small rounded tile (dark surface with
+/// a thin border) holding a shield icon tinted in the opponent's color and the
 /// damage taken from them. Opaque so its tap is consumed by this overlay rather
-/// than falling through to the life router below.
-class _CommanderDamageChip extends StatelessWidget {
-  const _CommanderDamageChip({
+/// than falling through to the life router below. Flags red at 21+ (lethal).
+class _CommanderDamageCell extends StatelessWidget {
+  const _CommanderDamageCell({
     super.key,
     required this.color,
     required this.value,
@@ -727,28 +740,28 @@ class _CommanderDamageChip extends StatelessWidget {
       onTap: onTap,
       onLongPress: onDecrement,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        width: 54,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         decoration: BoxDecoration(
           color: lethal
               ? LifeTapColors.negative.withValues(alpha: 0.85)
               : LifeTapColors.chip,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color, width: 1.5),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: lethal ? LifeTapColors.negative : LifeTapColors.divider,
+            width: 1,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-            ),
-            const SizedBox(width: 5),
+            Icon(Icons.shield, size: 14, color: color),
+            const SizedBox(width: 4),
             Text(
               '$value',
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: FontWeight.w700,
               ),
             ),
