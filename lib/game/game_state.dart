@@ -2,6 +2,10 @@ import 'package:flutter/foundation.dart';
 
 enum CounterMode { life, poison, energy, experience }
 
+/// Sentinel so [PlayerState.copyWith] can tell "leave unchanged" apart from
+/// "set to null" for the nullable commander fields.
+const Object _unset = Object();
+
 @immutable
 class PlayerState {
   const PlayerState({
@@ -13,6 +17,8 @@ class PlayerState {
     this.energy = 0,
     this.experience = 0,
     this.commanderDamage = const {},
+    this.commanderName,
+    this.artUrl,
   });
 
   final int id;
@@ -25,6 +31,12 @@ class PlayerState {
 
   /// Damage taken from each opponent's commander, keyed by opponent id.
   final Map<int, int> commanderDamage;
+
+  /// The player's commander card name, or null if none has been set.
+  final String? commanderName;
+
+  /// Resolved commander art URL used as the zone background, or null.
+  final String? artUrl;
 
   int counter(CounterMode mode) => switch (mode) {
     CounterMode.life => life,
@@ -46,6 +58,8 @@ class PlayerState {
     int? energy,
     int? experience,
     Map<int, int>? commanderDamage,
+    Object? commanderName = _unset,
+    Object? artUrl = _unset,
   }) {
     return PlayerState(
       id: id,
@@ -56,6 +70,10 @@ class PlayerState {
       energy: energy ?? this.energy,
       experience: experience ?? this.experience,
       commanderDamage: commanderDamage ?? this.commanderDamage,
+      commanderName: identical(commanderName, _unset)
+          ? this.commanderName
+          : commanderName as String?,
+      artUrl: identical(artUrl, _unset) ? this.artUrl : artUrl as String?,
     );
   }
 }
