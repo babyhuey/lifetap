@@ -10,6 +10,7 @@ import '../game/game_events.dart';
 import '../game/game_state.dart';
 import '../game/game_notifier.dart';
 import '../touch/pointer_router.dart';
+import 'life_delta.dart';
 import 'seat_layout.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
@@ -78,6 +79,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
             delta: delta,
           ),
         );
+    // Feed the transient floating "+N / −N" indicator for this seat; it sums
+    // consecutive tap/hold changes and fades on its own.
+    ref.read(lifeDeltaProvider.notifier).bump(playerId, delta);
   }
 
   void _onPointerDown(PointerDownEvent e) {
@@ -359,6 +363,7 @@ class _PlayerZone extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
     final ko = _knockedOut(player, settings);
+    final delta = ref.watch(lifeDeltaProvider)[player.id] ?? 0;
     final base = Color(player.color);
     final solid = Color.lerp(base, Colors.black, 0.6)!;
     final art = player.artUrl;
@@ -413,6 +418,10 @@ class _PlayerZone extends ConsumerWidget {
                 _EdgeHint(alignment: Alignment.centerLeft, icon: Icons.remove),
                 _EdgeHint(alignment: Alignment.centerRight, icon: Icons.add),
                 _ZoneContent(player: player, knockedOut: ko),
+                Align(
+                  alignment: const Alignment(0, -0.45),
+                  child: _LifeDeltaLabel(delta: delta),
+                ),
               ],
             ),
           ),
@@ -438,6 +447,73 @@ class _EdgeHint extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: Icon(icon, size: 34, color: Colors.white.withValues(alpha: 0.3)),
+      ),
+    );
+  }
+}
+
+/// The floating "+N / −N" indicator that briefly appears near a player's life
+/// number when their life changes from the tap/hold path. It shows the summed
+/// change over the accumulation window (green gains, red losses) and fades out
+/// once the window clears [delta] back to 0. Display-only: it carries no hit
+/// target, so taps fall through to the life router. Sits inside the seat's
+/// [RotatedBox] so it reads from the player's seat.
+class _LifeDeltaLabel extends StatefulWidget {
+  const _LifeDeltaLabel({required this.delta});
+
+  final int delta;
+
+  @override
+  State<_LifeDeltaLabel> createState() => _LifeDeltaLabelState();
+}
+
+class _LifeDeltaLabelState extends State<_LifeDeltaLabel> {
+  // The last non-zero value, retained so the label still reads its number while
+  // it fades out after the window resets the delta to 0; back to 0 once faded.
+  int _shown = 0;
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _shown = widget.delta;
+    _visible = widget.delta != 0;
+  }
+
+  @override
+  void didUpdateWidget(_LifeDeltaLabel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.delta != 0) {
+      _shown = widget.delta;
+      _visible = true;
+    } else {
+      _visible = false; // start fading out, keeping _shown for the label text
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Idle and fully faded: render nothing at all.
+    if (!_visible && _shown == 0) return const SizedBox.shrink();
+    final positive = _shown >= 0;
+    return IgnorePointer(
+      child: AnimatedOpacity(
+        opacity: _visible ? 1 : 0,
+        duration: const Duration(milliseconds: 350),
+        onEnd: () {
+          if (!_visible && _shown != 0) setState(() => _shown = 0);
+        },
+        child: Text(
+          '${positive ? '+' : '−'}${_shown.abs()}',
+          style: TextStyle(
+            color: positive ? LifeTapColors.positive : LifeTapColors.negative,
+            fontSize: 30,
+            fontWeight: FontWeight.w800,
+            shadows: const [
+              Shadow(color: Colors.black, blurRadius: 6, offset: Offset(0, 1)),
+            ],
+          ),
+        ),
       ),
     );
   }
