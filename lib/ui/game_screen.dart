@@ -1190,17 +1190,20 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
     controller.text = result;
     onSubmit(result);
     // onSubmit may refuse or normalize the value (an empty/whitespace name isn't
-    // applied), so re-seed the read-only fields from the authoritative game
-    // state rather than the raw input — otherwise a rejected rename would leave
-    // the field showing the blank string. Skipped while a commander lookup is
-    // still resolving, where the field must keep the just-typed name until the
-    // dispatch lands (game state hasn't updated yet).
-    if (!mounted || _resolving) return;
+    // applied), so re-seed the edited read-only field from the authoritative
+    // game state rather than the raw input — otherwise a rejected rename would
+    // leave the field showing the blank string. Re-sync only the field that was
+    // edited so the two stay independent. The name submit is synchronous, so its
+    // field can always re-sync; the commander submit resolves art asynchronously,
+    // so its field must keep the just-typed name until the dispatch lands (skip
+    // the re-sync while a lookup is still resolving).
+    if (!mounted) return;
     final player = ref.read(gameProvider).current.player(widget.playerId);
-    setState(() {
-      _nameController.text = player.name;
-      _commanderController.text = player.commanderName ?? '';
-    });
+    if (identical(controller, _nameController)) {
+      setState(() => _nameController.text = player.name);
+    } else if (identical(controller, _commanderController) && !_resolving) {
+      setState(() => _commanderController.text = player.commanderName ?? '');
+    }
   }
 
   @override
