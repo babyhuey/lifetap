@@ -184,25 +184,6 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                     ),
                   ),
                 ),
-              // Name labels also sit above the Listener so tapping a name opens
-              // the rename editor instead of the router reading it as a life
-              // tap. Only the label's hit area is consumed; the rest of the
-              // cell falls through to the router below.
-              for (var i = 0; i < players.length; i++)
-                Positioned.fromRect(
-                  rect: rects[i],
-                  child: RotatedBox(
-                    quarterTurns: turns[i],
-                    child: Align(
-                      alignment: Alignment.topCenter,
-                      child: _PlayerNameLabel(
-                        name: players[i].name,
-                        color: Color(players[i].color),
-                        onTap: () => _editName(players[i].id, turns[i]),
-                      ),
-                    ),
-                  ),
-                ),
               // The commander-damage squares sit above the Listener so their
               // taps adjust commander damage instead of routing a life tap;
               // like the gear/name only each square's hit area is consumed, the
@@ -251,6 +232,24 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       ),
                     ),
               ],
+              // Name labels render last so they stay on top of (and tappable
+              // over) any commander-damage square that shares the seat's inner
+              // edge; tapping a name opens the rename editor.
+              for (var i = 0; i < players.length; i++)
+                Positioned.fromRect(
+                  rect: rects[i],
+                  child: RotatedBox(
+                    quarterTurns: turns[i],
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: _PlayerNameLabel(
+                        name: players[i].name,
+                        color: Color(players[i].color),
+                        onTap: () => _editName(players[i].id, turns[i]),
+                      ),
+                    ),
+                  ),
+                ),
               Positioned.fromRect(
                 rect: layout.toolbar,
                 child: _Toolbar(
@@ -419,8 +418,13 @@ List<Rect> _zoneRects(int count, Size size) {
 }
 
 /// Side length and in-zone margin of a positional commander-damage square.
-const double _cmdrSquareSize = 44;
+const double _cmdrSquareSize = 42;
 const double _cmdrSquareMargin = 6;
+
+/// How far a positional square's near edge sits inside the zone border. Kept
+/// large enough that the squares clear the name pill, which hugs the zone's
+/// inner edge for side-facing seats.
+const double _cmdrEdgeInset = 52;
 
 /// Clamps a [_cmdrSquareSize] square centered at [center] so it stays fully
 /// inside [zone] with [_cmdrSquareMargin] to spare, returning its rect. Keeps a
@@ -441,27 +445,43 @@ Rect _clampSquareInZone(Rect zone, Offset center) {
   );
 }
 
+/// Distance from [zone]'s center to its edge along unit vector [dir].
+double _distanceToEdge(Rect zone, Offset dir) {
+  final tx = dir.dx.abs() < 1e-6
+      ? double.infinity
+      : (zone.width / 2) / dir.dx.abs();
+  final ty = dir.dy.abs() < 1e-6
+      ? double.infinity
+      : (zone.height / 2) / dir.dy.abs();
+  return min(tx, ty);
+}
+
 /// Where the square for opponent [opponentZone] lands inside player [zone]:
-/// pushed from the zone center toward that opponent's seat by 30% of the zone's
-/// shorter side, then clamped to stay in-zone. So the opponent on the player's
-/// physical right shows up on the right, the one across shows up across, etc.
+/// pushed from the zone center all the way out to the zone edge in that
+/// opponent's direction (then pulled in just enough to stay fully inside), so
+/// the squares hug the perimeter and frame the big life number instead of
+/// covering it. The opponent on the player's physical right shows up on the
+/// right, the one across shows up across, etc.
 Rect _opponentSquareRect(Rect zone, Rect opponentZone) {
   final toOpponent = opponentZone.center - zone.center;
   final distance = toOpponent.distance;
-  final dir = distance == 0 ? Offset.zero : toOpponent / distance;
-  final reach = 0.30 * min(zone.width, zone.height);
-  return _clampSquareInZone(zone, zone.center + dir * reach);
+  if (distance == 0) return _clampSquareInZone(zone, zone.center);
+  final dir = toOpponent / distance;
+  final reach =
+      _distanceToEdge(zone, dir) - (_cmdrSquareSize / 2 + _cmdrEdgeInset);
+  return _clampSquareInZone(zone, zone.center + dir * max(reach, 0));
 }
 
-/// Where player [zone]'s own "me" holder lands: nudged from the zone center
-/// toward the zone's outer edge (away from [screen] center) so it clears the big
-/// life number, then clamped to stay in-zone.
+/// Where player [zone]'s own "me" holder lands: pushed to the zone's outer edge
+/// (away from [screen] center) so it sits opposite the opponent squares and
+/// clears the big life number.
 Rect _meSquareRect(Rect zone, Size screen) {
   final outward = zone.center - screen.center(Offset.zero);
   final distance = outward.distance;
   final dir = distance == 0 ? const Offset(0, 1) : outward / distance;
-  final reach = 0.34 * min(zone.width, zone.height);
-  return _clampSquareInZone(zone, zone.center + dir * reach);
+  final reach =
+      _distanceToEdge(zone, dir) - (_cmdrSquareSize / 2 + _cmdrEdgeInset);
+  return _clampSquareInZone(zone, zone.center + dir * max(reach, 0));
 }
 
 /// True when the player has reached a lethal threshold under the current

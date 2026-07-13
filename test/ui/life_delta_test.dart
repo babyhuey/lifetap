@@ -13,11 +13,12 @@ void main() {
 
     // Default 800x600 window, four-player split layout: the top-left zone is
     // Rect(0,0,400,268) with a q1 (left-facing) seat, so its center is (200,134)
-    // and a tap below center reads as this player's own right (+).
+    // and a tap below center reads as this player's own right (+). Tap the open
+    // lower-left area, clear of the commander-damage squares.
     expect(find.text('40'), findsNWidgets(4));
 
-    await tester.tapAt(const Offset(200, 190));
-    await tester.tapAt(const Offset(200, 190));
+    await tester.tapAt(const Offset(110, 210));
+    await tester.tapAt(const Offset(110, 210));
     await tester.pump(); // rebuild; well within the 1.8s accumulation window
 
     // Both single-finger taps summed into one growing indicator, and only that
