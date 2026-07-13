@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../data/commander_art.dart';
 import '../game/game_events.dart';
 import '../game/game_state.dart';
 import '../game/game_notifier.dart';
 import '../touch/pointer_router.dart';
+import 'seat_layout.dart';
 
 /// Height reserved at the bottom for the toolbar so player zones never sit
 /// under it (and toolbar touches never route into a zone).
@@ -90,6 +92,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           final zoneArea = Size(size.width, size.height - _toolbarHeight);
           final rects = _zoneRects(players.length, zoneArea);
           _router.zones = rects;
+          final turns = seatQuarterTurns(players.length);
 
           return Stack(
             children: [
@@ -107,13 +110,33 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                           rect: rects[i],
                           child: _PlayerZone(
                             player: players[i],
-                            quarterTurns: _zoneQuarterTurns(i, players.length),
+                            quarterTurns: turns[i],
                           ),
                         ),
                     ],
                   ),
                 ),
               ),
+              // Gear affordances sit above the Listener so a tap opens the
+              // settings sheet instead of the router reading it as a life tap.
+              // Only the icon is hittable; the rest of each cell falls through.
+              for (var i = 0; i < players.length; i++)
+                Positioned.fromRect(
+                  rect: rects[i],
+                  child: RotatedBox(
+                    quarterTurns: turns[i],
+                    child: Align(
+                      alignment: Alignment.topRight,
+                      child: IconButton(
+                        tooltip: 'Player settings',
+                        color: Colors.white70,
+                        icon: const Icon(Icons.settings),
+                        onPressed: () =>
+                            _showPlayerSettings(players[i].id, turns[i]),
+                      ),
+                    ),
+                  ),
+                ),
               Positioned(
                 left: 0,
                 right: 0,
@@ -195,6 +218,15 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       ),
     );
   }
+
+  Future<void> _showPlayerSettings(int playerId, int quarterTurns) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) =>
+          _PlayerSettingsSheet(playerId: playerId, quarterTurns: quarterTurns),
+    );
+  }
 }
 
 /// Column-major grid: 1 column for 2 players, otherwise 2 columns. The last row
@@ -221,12 +253,6 @@ List<Rect> _zoneRects(int count, Size size) {
   return rects;
 }
 
-/// Top-row seats face across the table, so rotate them 180 degrees.
-int _zoneQuarterTurns(int index, int count) {
-  final cols = count <= 2 ? 1 : 2;
-  return (index ~/ cols) == 0 ? 2 : 0;
-}
-
 class _PlayerZone extends StatelessWidget {
   const _PlayerZone({required this.player, required this.quarterTurns});
 
@@ -236,36 +262,196 @@ class _PlayerZone extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base = Color(player.color);
-    return RotatedBox(
-      quarterTurns: quarterTurns,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Color.lerp(base, Colors.black, 0.6),
-          border: Border.all(color: base, width: 2),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                player.name,
-                style: const TextStyle(color: Colors.white70, fontSize: 18),
-              ),
-              Text(
-                '${player.life}',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 84,
-                  fontWeight: FontWeight.bold,
-                  decoration: player.isDead
-                      ? TextDecoration.lineThrough
-                      : TextDecoration.none,
+    final solid = Color.lerp(base, Colors.black, 0.6)!;
+    final art = player.artUrl;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(border: Border.all(color: base, width: 2)),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (art != null) ...[
+            // Falls back to the solid color while loading or on any error, so a
+            // missing/broken image never leaves the zone blank.
+            Image.network(
+              art,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stack) => ColoredBox(color: solid),
+              loadingBuilder: (context, child, progress) =>
+                  progress == null ? child : ColoredBox(color: solid),
+            ),
+            // Scrim so the white life number and name stay legible over art.
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black45, Colors.black54],
                 ),
               ),
-              Text(
-                'PSN ${player.poison}   NRG ${player.energy}   '
-                'EXP ${player.experience}',
-                style: const TextStyle(color: Colors.white60, fontSize: 12),
+            ),
+          ] else
+            ColoredBox(color: solid),
+          RotatedBox(
+            quarterTurns: quarterTurns,
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    player.name,
+                    style: const TextStyle(color: Colors.white70, fontSize: 18),
+                  ),
+                  Text(
+                    '${player.life}',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 84,
+                      fontWeight: FontWeight.bold,
+                      decoration: player.isDead
+                          ? TextDecoration.lineThrough
+                          : TextDecoration.none,
+                    ),
+                  ),
+                  Text(
+                    'PSN ${player.poison}   NRG ${player.energy}   '
+                    'EXP ${player.experience}',
+                    style: const TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A rotated modal sheet (readable from the player's seat) to rename the
+/// player, set their commander (resolving art on submit), and recolor.
+class _PlayerSettingsSheet extends ConsumerStatefulWidget {
+  const _PlayerSettingsSheet({
+    required this.playerId,
+    required this.quarterTurns,
+  });
+
+  final int playerId;
+  final int quarterTurns;
+
+  @override
+  ConsumerState<_PlayerSettingsSheet> createState() =>
+      _PlayerSettingsSheetState();
+}
+
+class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _commanderController;
+  bool _resolving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final player = ref.read(gameProvider).current.player(widget.playerId);
+    _nameController = TextEditingController(text: player.name);
+    _commanderController = TextEditingController(
+      text: player.commanderName ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _commanderController.dispose();
+    super.dispose();
+  }
+
+  void _submitName(String value) {
+    final name = value.trim();
+    if (name.isEmpty) return;
+    ref
+        .read(gameProvider.notifier)
+        .dispatch(RenamePlayer(playerId: widget.playerId, name: name));
+  }
+
+  Future<void> _submitCommander(String value) async {
+    final name = value.trim();
+    setState(() => _resolving = true);
+    final source = ref.read(commanderArtSourceProvider);
+    final art = name.isEmpty ? null : await source.artUrl(name);
+    if (!mounted) return;
+    ref
+        .read(gameProvider.notifier)
+        .dispatch(
+          SetCommander(
+            playerId: widget.playerId,
+            commanderName: name.isEmpty ? null : name,
+            artUrl: art,
+          ),
+        );
+    setState(() => _resolving = false);
+  }
+
+  void _recolor(int color) {
+    ref
+        .read(gameProvider.notifier)
+        .dispatch(RecolorPlayer(playerId: widget.playerId, color: color));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: RotatedBox(
+        quarterTurns: widget.quarterTurns,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _nameController,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(labelText: 'Name'),
+                onSubmitted: _submitName,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _commanderController,
+                textInputAction: TextInputAction.done,
+                decoration: InputDecoration(
+                  labelText: 'Commander',
+                  suffixIcon: _resolving
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : null,
+                ),
+                onSubmitted: _submitCommander,
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  for (final swatch in defaultColors)
+                    GestureDetector(
+                      onTap: () => _recolor(swatch),
+                      child: CircleAvatar(
+                        backgroundColor: Color(swatch),
+                        radius: 16,
+                      ),
+                    ),
+                ],
               ),
             ],
           ),

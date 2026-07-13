@@ -8,6 +8,7 @@ stages:
   - lint
   - test
   - integration
+  - deploy
 
 variables:
   PUB_CACHE: "$CI_PROJECT_DIR/.pub-cache"
@@ -52,4 +53,19 @@ integration-linux:
     - xvfb-run -a flutter test integration_test -d linux
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Builds the web app and publishes it as a GitLab Pages site so it can be
+# installed on an iPad from Safari (Share -> Add to Home Screen) with no Mac.
+# Served at https://<namespace>.gitlab.io/<project>/ — hence the base-href.
+pages:
+  stage: deploy
+  script:
+    - flutter config --enable-web
+    - flutter build web --release --base-href "/$CI_PROJECT_NAME/"
+    - rm -rf public && mv build/web public
+  artifacts:
+    paths:
+      - public
+  rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

@@ -148,6 +148,28 @@ class RenamePlayer extends GameEvent {
       '${before.player(playerId).name} renamed to $name';
 }
 
+/// Sets a player's commander name and resolved art URL (either may be null to
+/// clear it). Art resolution happens in the UI before dispatch, so [apply]
+/// stays pure.
+class SetCommander extends GameEvent {
+  const SetCommander({required this.playerId, this.commanderName, this.artUrl});
+
+  final int playerId;
+  final String? commanderName;
+  final String? artUrl;
+
+  @override
+  GameState apply(GameState state) => state.replacePlayer(
+    state
+        .player(playerId)
+        .copyWith(commanderName: commanderName, artUrl: artUrl),
+  );
+
+  @override
+  String describe(GameState before) =>
+      '${before.player(playerId).name} commander → $commanderName';
+}
+
 /// Recolors a player.
 class RecolorPlayer extends GameEvent {
   const RecolorPlayer({required this.playerId, required this.color});
