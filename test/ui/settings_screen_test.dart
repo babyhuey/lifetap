@@ -49,10 +49,34 @@ void main() {
     );
     await tester.pump();
 
-    // Auto-KO is the second (last) toggle row.
+    // Auto-KO is the last toggle row.
     await tester.tap(find.byType(Switch).last);
     await tester.pump();
 
     expect(container.read(settingsProvider).autoKo, isFalse);
+  });
+
+  testWidgets('the In-app keyboard toggle flips the settings flag', (
+    tester,
+  ) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    // On by default.
+    expect(container.read(settingsProvider).inAppKeyboard, isTrue);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: SettingsScreen()),
+      ),
+    );
+    await tester.pump();
+
+    // Tapping the row's title toggles its SwitchListTile.
+    await tester.tap(find.text('In-app keyboard'));
+    await tester.pump();
+
+    expect(container.read(settingsProvider).inAppKeyboard, isFalse);
   });
 }
