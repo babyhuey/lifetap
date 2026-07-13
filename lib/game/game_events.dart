@@ -201,8 +201,12 @@ class SetCommander extends GameEvent {
   );
 
   @override
-  String describe(GameState before) =>
-      '${before.player(playerId).name} commander → $commanderName';
+  String describe(GameState before) {
+    final name = before.player(playerId).name;
+    return commanderName == null
+        ? '$name commander cleared'
+        : '$name commander → $commanderName';
+  }
 }
 
 /// Recolors a player.

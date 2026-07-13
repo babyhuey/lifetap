@@ -183,6 +183,29 @@ void main() {
     );
   });
 
+  group('SetCommander describe', () {
+    test('a cleared commander reads as cleared, not "→ null"', () {
+      final state = _newGame();
+      final line = const SetCommander(
+        playerId: 0,
+        commanderName: null,
+      ).describe(state);
+
+      expect(line, isNot(contains('null')));
+      expect(line.toLowerCase(), contains('cleared'));
+    });
+
+    test('setting a commander shows the name', () {
+      final state = _newGame();
+      final line = const SetCommander(
+        playerId: 0,
+        commanderName: 'Atraxa',
+      ).describe(state);
+
+      expect(line, contains('Atraxa'));
+    });
+  });
+
   group('rename and recolor', () {
     test('RenamePlayer and RecolorPlayer update the target player', () {
       var state = _newGame();
