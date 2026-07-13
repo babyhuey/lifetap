@@ -11,6 +11,8 @@ import '../game/game_state.dart';
 import '../game/game_notifier.dart';
 import '../touch/pointer_router.dart';
 import 'seat_layout.dart';
+import 'settings_screen.dart';
+import 'theme.dart';
 
 /// Height reserved at the bottom for the toolbar so player zones never sit
 /// under it (and toolbar touches never route into a zone).
@@ -101,6 +103,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final players = session.current.players;
 
     return Scaffold(
+      backgroundColor: LifeTapColors.background,
       body: LayoutBuilder(
         builder: (context, constraints) {
           final size = constraints.biggest;
@@ -145,6 +148,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       child: IconButton(
                         tooltip: 'Player settings',
                         color: Colors.white70,
+                        iconSize: 20,
                         icon: const Icon(Icons.settings),
                         onPressed: () =>
                             _showPlayerSettings(players[i].id, turns[i]),
@@ -176,7 +180,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 bottom: 0,
                 height: _toolbarHeight,
                 child: _Toolbar(
-                  onNewGame: _showNewGameDialog,
+                  playerCount: players.length,
+                  onSettings: _openSettings,
                   onUndo: () => ref.read(gameProvider.notifier).undo(),
                   onDice: _showDice,
                   onCoin: _showCoin,
@@ -190,29 +195,17 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     );
   }
 
-  Future<void> _showNewGameDialog() async {
-    final choice = await showDialog<({int count, int life})>(
-      context: context,
-      builder: (context) => const _NewGameDialog(),
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (context) => const SettingsScreen()),
     );
-    if (choice == null) return;
-    ref.read(gameProvider.notifier).newGame(choice.count, choice.life);
   }
 
   Future<void> _showDice() async {
     final roll = _rng.nextInt(20) + 1;
     await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('d20'),
-        content: Text('$roll', style: const TextStyle(fontSize: 48)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
+      builder: (context) => _RollDialog(title: 'd20', value: '$roll'),
     );
   }
 
@@ -220,41 +213,23 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final heads = _rng.nextBool();
     await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Coin flip'),
-        content: Text(
-          heads ? 'Heads' : 'Tails',
-          style: const TextStyle(fontSize: 32),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
+      builder: (context) =>
+          _RollDialog(title: 'Coin flip', value: heads ? 'Heads' : 'Tails'),
     );
   }
 
   Future<void> _showHistory() async {
-    final lines = ref.read(gameProvider.notifier).historyLines();
     await showModalBottomSheet<void>(
       context: context,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            for (var i = lines.length - 1; i >= 0; i--)
-              ListTile(dense: true, title: Text(lines[i])),
-          ],
-        ),
-      ),
+      backgroundColor: LifeTapColors.surface,
+      builder: (context) => const _HistorySheet(),
     );
   }
 
   Future<void> _showPlayerSettings(int playerId, int quarterTurns) async {
     await showModalBottomSheet<void>(
       context: context,
+      backgroundColor: LifeTapColors.surface,
       isScrollControlled: true,
       builder: (context) =>
           _PlayerSettingsSheet(playerId: playerId, quarterTurns: quarterTurns),
@@ -304,20 +279,37 @@ List<Rect> _zoneRects(int count, Size size) {
   return rects;
 }
 
-class _PlayerZone extends StatelessWidget {
+/// True when the player has reached a lethal threshold under the current
+/// settings — used only for the knocked-out visual, never for game logic.
+bool _knockedOut(PlayerState player, GameSettings settings) {
+  if (!settings.autoKo) return false;
+  final cmdrLethal =
+      settings.commanderDamageLifeLoss &&
+      player.commanderDamage.values.any((d) => d >= 21);
+  return player.life <= 0 || player.poison >= 10 || cmdrLethal;
+}
+
+class _PlayerZone extends ConsumerWidget {
   const _PlayerZone({required this.player, required this.quarterTurns});
 
   final PlayerState player;
   final int quarterTurns;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final ko = _knockedOut(player, settings);
     final base = Color(player.color);
     final solid = Color.lerp(base, Colors.black, 0.6)!;
     final art = player.artUrl;
 
     return DecoratedBox(
-      decoration: BoxDecoration(border: Border.all(color: base, width: 2)),
+      decoration: const BoxDecoration(
+        color: LifeTapColors.background,
+        border: Border.fromBorderSide(
+          BorderSide(color: LifeTapColors.divider, width: 1),
+        ),
+      ),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -332,41 +324,181 @@ class _PlayerZone extends StatelessWidget {
                   progress == null ? child : ColoredBox(color: solid),
             ),
             // Scrim so the white life number and name stay legible over art.
-            const DecoratedBox(
+            DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Colors.black45, Colors.black54],
+                  colors: [
+                    Colors.black.withValues(alpha: 0.35),
+                    Colors.black.withValues(alpha: 0.6),
+                  ],
                 ),
               ),
             ),
           ] else
             ColoredBox(color: solid),
+          // Faint decorative left = −, right = + hints in PHYSICAL zone space
+          // (the router signs taps by physical left/right, not seat facing), so
+          // these are deliberately not rotated with the seat content.
+          _EdgeHint(alignment: Alignment.centerLeft, icon: Icons.remove),
+          _EdgeHint(alignment: Alignment.centerRight, icon: Icons.add),
           RotatedBox(
             quarterTurns: quarterTurns,
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
+            child: _ZoneContent(player: player, knockedOut: ko),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A low-opacity ± glyph pinned to one vertical edge of the zone. Purely
+/// decorative: it adds no hit target, so taps fall through to the life router.
+class _EdgeHint extends StatelessWidget {
+  const _EdgeHint({required this.alignment, required this.icon});
+
+  final Alignment alignment;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: alignment,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Icon(icon, size: 34, color: Colors.white.withValues(alpha: 0.3)),
+      ),
+    );
+  }
+}
+
+/// The seat-rotated content of a zone: the huge life number plus the outer-edge
+/// counter chip cluster. Rotated as a unit so it reads from the player's seat.
+class _ZoneContent extends StatelessWidget {
+  const _ZoneContent({required this.player, required this.knockedOut});
+
+  final PlayerState player;
+  final bool knockedOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final fontSize = constraints.biggest.shortestSide * 0.42;
+        return Stack(
+          children: [
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
                     '${player.life}',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 84,
-                      fontWeight: FontWeight.bold,
-                      decoration: player.isDead
+                      fontSize: fontSize,
+                      fontWeight: FontWeight.w800,
+                      decoration: knockedOut
                           ? TextDecoration.lineThrough
                           : TextDecoration.none,
+                      shadows: const [
+                        Shadow(
+                          color: Colors.black,
+                          blurRadius: 8,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
                     ),
                   ),
-                  Text(
-                    'PSN ${player.poison}   NRG ${player.energy}   '
-                    'EXP ${player.experience}',
-                    style: const TextStyle(color: Colors.white60, fontSize: 12),
-                  ),
-                ],
+                ),
               ),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _CounterChips(player: player),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A compact wrap of small rounded chips for the player's non-zero secondary
+/// counters and commander-damage entries. Shows nothing when all are zero.
+class _CounterChips extends StatelessWidget {
+  const _CounterChips({required this.player});
+
+  final PlayerState player;
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = <Widget>[
+      if (player.poison > 0)
+        _CounterChip(
+          icon: Icons.water_drop,
+          value: player.poison,
+          color: LifeTapColors.poison,
+        ),
+      if (player.energy > 0)
+        _CounterChip(
+          icon: Icons.bolt,
+          value: player.energy,
+          color: LifeTapColors.accent,
+        ),
+      if (player.experience > 0)
+        _CounterChip(
+          icon: Icons.auto_awesome,
+          value: player.experience,
+          color: LifeTapColors.accent,
+        ),
+      for (final dmg in player.commanderDamage.entries)
+        if (dmg.value > 0)
+          _CounterChip(
+            icon: Icons.shield,
+            value: dmg.value,
+            color: LifeTapColors.accent,
+          ),
+    ];
+    if (chips.isEmpty) return const SizedBox.shrink();
+    return Wrap(spacing: 6, runSpacing: 6, children: chips);
+  }
+}
+
+class _CounterChip extends StatelessWidget {
+  const _CounterChip({
+    required this.icon,
+    required this.value,
+    required this.color,
+  });
+
+  final IconData icon;
+  final int value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: LifeTapColors.chip,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            '$value',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -375,7 +507,7 @@ class _PlayerZone extends StatelessWidget {
   }
 }
 
-/// The tappable player-name label pinned to the top edge of a zone. It carries
+/// The tappable player-name pill pinned to the top edge of a zone. It carries
 /// [HitTestBehavior.opaque] so its own hit area consumes taps (opening the
 /// rename editor) while the surrounding cell falls through to the life router.
 class _PlayerNameLabel extends StatelessWidget {
@@ -386,17 +518,24 @@ class _PlayerNameLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-        child: Text(
-          name,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Text(
+            name,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ),
@@ -566,6 +705,7 @@ class _NameEditDialogState extends State<_NameEditDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      backgroundColor: LifeTapColors.surface,
       title: const Text('Player name'),
       content: TextField(
         controller: _controller,
@@ -585,16 +725,47 @@ class _NameEditDialogState extends State<_NameEditDialog> {
   }
 }
 
+/// Small centered result dialog shared by the d20 and coin-flip buttons.
+class _RollDialog extends StatelessWidget {
+  const _RollDialog({required this.title, required this.value});
+
+  final String title;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: LifeTapColors.surface,
+      title: Text(title),
+      content: Text(
+        value,
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w800),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    );
+  }
+}
+
+/// The slim bottom toolbar: white icon buttons plus a cyan-ringed badge showing
+/// the current player count. Reset and the badge both open the settings screen.
 class _Toolbar extends StatelessWidget {
   const _Toolbar({
-    required this.onNewGame,
+    required this.playerCount,
+    required this.onSettings,
     required this.onUndo,
     required this.onDice,
     required this.onCoin,
     required this.onHistory,
   });
 
-  final VoidCallback onNewGame;
+  final int playerCount;
+  final VoidCallback onSettings;
   final VoidCallback onUndo;
   final VoidCallback onDice;
   final VoidCallback onCoin;
@@ -603,32 +774,38 @@ class _Toolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.black,
+      color: LifeTapColors.background,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           IconButton(
             tooltip: 'New game',
-            onPressed: onNewGame,
+            color: Colors.white,
+            onPressed: onSettings,
             icon: const Icon(Icons.refresh),
           ),
+          _PlayerCountBadge(count: playerCount, onTap: onSettings),
           IconButton(
             tooltip: 'Undo',
+            color: Colors.white,
             onPressed: onUndo,
             icon: const Icon(Icons.undo),
           ),
           IconButton(
             tooltip: 'Dice',
+            color: Colors.white,
             onPressed: onDice,
             icon: const Icon(Icons.casino),
           ),
           IconButton(
             tooltip: 'Coin flip',
+            color: Colors.white,
             onPressed: onCoin,
             icon: const Icon(Icons.monetization_on),
           ),
           IconButton(
             tooltip: 'History',
+            color: Colors.white,
             onPressed: onHistory,
             icon: const Icon(Icons.history),
           ),
@@ -638,63 +815,237 @@ class _Toolbar extends StatelessWidget {
   }
 }
 
-class _NewGameDialog extends StatefulWidget {
-  const _NewGameDialog();
+class _PlayerCountBadge extends StatelessWidget {
+  const _PlayerCountBadge({required this.count, required this.onTap});
 
-  @override
-  State<_NewGameDialog> createState() => _NewGameDialogState();
-}
-
-class _NewGameDialogState extends State<_NewGameDialog> {
-  int _count = 4;
-  int _life = 20;
+  final int count;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('New game'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Players'),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final n in [2, 3, 4, 5, 6])
-                ChoiceChip(
-                  label: Text('$n'),
-                  selected: _count == n,
-                  onSelected: (_) => setState(() => _count = n),
-                ),
-            ],
+    return IconButton(
+      tooltip: 'Players',
+      onPressed: onTap,
+      icon: Container(
+        width: 30,
+        height: 30,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: LifeTapColors.accent, width: 2),
+        ),
+        child: Text(
+          '$count',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
           ),
-          const SizedBox(height: 12),
-          const Text('Starting life'),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final l in [20, 30, 40])
-                ChoiceChip(
-                  label: Text('$l'),
-                  selected: _life == l,
-                  onSelected: (_) => setState(() => _life = l),
+        ),
+      ),
+    );
+  }
+}
+
+/// Color-coded, newest-first history read from the event log. Each life or
+/// counter change shows the player's color dot, name, a counter icon, a signed
+/// delta chip, and the resulting value. Watches the game so undo updates live.
+class _HistorySheet extends ConsumerWidget {
+  const _HistorySheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final session = ref.watch(gameProvider);
+    final entries = <_HistoryEntry>[];
+    var state = const GameState(players: [], startingLife: 20);
+    for (final event in session.history) {
+      final before = state;
+      state = event.apply(state);
+      entries.add(_HistoryEntry.from(event, before, state));
+    }
+
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+            child: Row(
+              children: [
+                const Text(
+                  'History',
+                  style: TextStyle(
+                    color: LifeTapColors.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-            ],
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => ref.read(gameProvider.notifier).undo(),
+                  icon: const Icon(Icons.undo, size: 18),
+                  label: const Text('Undo'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: LifeTapColors.accent,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(color: LifeTapColors.divider, height: 1),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (var i = entries.length - 1; i >= 0; i--)
+                  _HistoryTile(entry: entries[i]),
+              ],
+            ),
           ),
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () =>
-              Navigator.of(context).pop((count: _count, life: _life)),
-          child: const Text('Start'),
-        ),
-      ],
+    );
+  }
+}
+
+/// How a history entry's delta chip is colored: by life sign, or accent for
+/// any non-life counter change.
+enum _DeltaKind { positive, negative, counter, none }
+
+/// A flattened, display-ready projection of one [GameEvent] for the history
+/// list, computed from the state just before and after the event ran.
+class _HistoryEntry {
+  const _HistoryEntry({
+    this.color,
+    this.icon,
+    this.delta,
+    this.result,
+    this.kind = _DeltaKind.none,
+    required this.text,
+  });
+
+  final Color? color;
+  final IconData? icon;
+  final int? delta;
+  final int? result;
+  final _DeltaKind kind;
+  final String text;
+
+  factory _HistoryEntry.from(
+    GameEvent event,
+    GameState before,
+    GameState after,
+  ) {
+    if (event is AdjustCounter) {
+      final p = after.player(event.playerId);
+      final isLife = event.mode == CounterMode.life;
+      return _HistoryEntry(
+        color: Color(p.color),
+        icon: _counterIcon(event.mode),
+        delta: event.delta,
+        result: p.counter(event.mode),
+        kind: isLife
+            ? (event.delta >= 0 ? _DeltaKind.positive : _DeltaKind.negative)
+            : _DeltaKind.counter,
+        text: p.name,
+      );
+    }
+    if (event is AdjustCommanderDamage) {
+      final p = after.player(event.playerId);
+      return _HistoryEntry(
+        color: Color(p.color),
+        icon: Icons.shield,
+        delta: event.delta,
+        result: p.commanderDamage[event.fromPlayerId] ?? 0,
+        kind: _DeltaKind.counter,
+        text: p.name,
+      );
+    }
+    // Rename/recolor/set-commander carry a player color dot; NewGame is neutral.
+    final playerId = switch (event) {
+      RenamePlayer(:final playerId) => playerId,
+      RecolorPlayer(:final playerId) => playerId,
+      SetCommander(:final playerId) => playerId,
+      _ => null,
+    };
+    return _HistoryEntry(
+      color: playerId == null ? null : Color(after.player(playerId).color),
+      text: event.describe(before),
+    );
+  }
+
+  static IconData _counterIcon(CounterMode mode) => switch (mode) {
+    CounterMode.life => Icons.favorite,
+    CounterMode.poison => Icons.water_drop,
+    CounterMode.energy => Icons.bolt,
+    CounterMode.experience => Icons.auto_awesome,
+  };
+}
+
+class _HistoryTile extends StatelessWidget {
+  const _HistoryTile({required this.entry});
+
+  final _HistoryEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final deltaColor = switch (entry.kind) {
+      _DeltaKind.positive => LifeTapColors.positive,
+      _DeltaKind.negative => LifeTapColors.negative,
+      _DeltaKind.counter => LifeTapColors.accent,
+      _DeltaKind.none => LifeTapColors.textSecondary,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: entry.color ?? LifeTapColors.divider,
+            ),
+          ),
+          const SizedBox(width: 10),
+          if (entry.icon != null) ...[
+            Icon(entry.icon, size: 16, color: Colors.white70),
+            const SizedBox(width: 6),
+          ],
+          Expanded(
+            child: Text(
+              entry.text,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (entry.delta != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: deltaColor.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '${entry.delta! >= 0 ? '+' : ''}${entry.delta}',
+                style: TextStyle(
+                  color: deltaColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '→ ${entry.result}',
+              style: const TextStyle(
+                color: LifeTapColors.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
