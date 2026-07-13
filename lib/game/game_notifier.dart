@@ -20,7 +20,7 @@ class GameNotifier extends Notifier<GameSession> {
 
   @override
   GameSession build() {
-    const seed = NewGame(playerCount: 4, startingLife: 20);
+    const seed = NewGame(playerCount: 4, startingLife: 40);
     return GameSession(current: seed.apply(_empty), history: const [seed]);
   }
 

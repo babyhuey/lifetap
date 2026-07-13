@@ -10,9 +10,9 @@ void main() {
     final container = ProviderContainer();
     addTearDown(container.dispose);
 
-    // Baseline is the default 4-player, 20-life game.
+    // Baseline is the default 4-player, 40-life game.
     expect(container.read(gameProvider).current.playerCount, 4);
-    expect(container.read(gameProvider).current.startingLife, 20);
+    expect(container.read(gameProvider).current.startingLife, 40);
 
     await tester.pumpWidget(
       UncontrolledProviderScope(

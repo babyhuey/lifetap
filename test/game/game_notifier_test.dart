@@ -14,10 +14,10 @@ void main() {
     addTearDown(container.dispose);
   });
 
-  test('starts as a 4-player, 20-life game with a single history event', () {
+  test('starts as a 4-player, 40-life game with a single history event', () {
     expect(session().current.playerCount, 4);
     expect(session().current.players, everyElement(isA<PlayerState>()));
-    expect(session().current.players.map((p) => p.life), everyElement(20));
+    expect(session().current.players.map((p) => p.life), everyElement(40));
     expect(session().history, hasLength(1));
   });
 
@@ -27,7 +27,7 @@ void main() {
     );
 
     expect(session().history, hasLength(2));
-    expect(session().current.player(0).life, 17);
+    expect(session().current.player(0).life, 37);
   });
 
   test('undo reverses a commander-damage-with-life event exactly', () {
