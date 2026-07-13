@@ -1163,8 +1163,44 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
         .dispatch(RecolorPlayer(playerId: widget.playerId, color: color));
   }
 
+  /// In-app-keyboard path for a field: pop the shared seat-rotated [_NameEditDialog]
+  /// (captioned [label]) seeded with [controller]'s text; on a non-null result
+  /// write it back and run [onSubmit] (the same handler the native field uses on
+  /// submit — commander keeps its async Scryfall art resolution).
+  Future<void> _editField(
+    TextEditingController controller,
+    String label,
+    void Function(String) onSubmit,
+  ) async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => _NameEditDialog(
+        initialName: controller.text,
+        quarterTurns: widget.quarterTurns,
+        inAppKeyboard: true,
+        label: label,
+      ),
+    );
+    if (result == null) return;
+    controller.text = result;
+    onSubmit(result);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Same toggle as the rename editor: on = tap a read-only field to open the
+    // big seat-rotated in-app keyboard (no OS keyboard); off = native TextField.
+    final inAppKeyboard = ref.watch(settingsProvider).inAppKeyboard;
+    final Widget? suffix = _resolving
+        ? const Padding(
+            padding: EdgeInsets.all(12),
+            child: SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          )
+        : null;
     return SafeArea(
       child: RotatedBox(
         quarterTurns: widget.quarterTurns,
@@ -1179,31 +1215,49 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextField(
-                controller: _nameController,
-                textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(labelText: 'Name'),
-                onSubmitted: _submitName,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _commanderController,
-                textInputAction: TextInputAction.done,
-                decoration: InputDecoration(
-                  labelText: 'Commander',
-                  suffixIcon: _resolving
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        )
-                      : null,
+              if (inAppKeyboard)
+                TextField(
+                  key: const ValueKey('field-name'),
+                  controller: _nameController,
+                  readOnly: true,
+                  decoration: const InputDecoration(labelText: 'Name'),
+                  onTap: () => _editField(_nameController, 'Name', _submitName),
+                )
+              else
+                TextField(
+                  key: const ValueKey('field-name'),
+                  controller: _nameController,
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(labelText: 'Name'),
+                  onSubmitted: _submitName,
                 ),
-                onSubmitted: _submitCommander,
-              ),
+              const SizedBox(height: 12),
+              if (inAppKeyboard)
+                TextField(
+                  key: const ValueKey('field-commander'),
+                  controller: _commanderController,
+                  readOnly: true,
+                  decoration: InputDecoration(
+                    labelText: 'Commander',
+                    suffixIcon: suffix,
+                  ),
+                  onTap: () => _editField(
+                    _commanderController,
+                    'Commander',
+                    _submitCommander,
+                  ),
+                )
+              else
+                TextField(
+                  key: const ValueKey('field-commander'),
+                  controller: _commanderController,
+                  textInputAction: TextInputAction.done,
+                  decoration: InputDecoration(
+                    labelText: 'Commander',
+                    suffixIcon: suffix,
+                  ),
+                  onSubmitted: _submitCommander,
+                ),
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -1249,11 +1303,16 @@ class _NameEditDialog extends StatefulWidget {
     required this.initialName,
     required this.quarterTurns,
     required this.inAppKeyboard,
+    this.label = 'Name',
   });
 
   final String initialName;
   final int quarterTurns;
   final bool inAppKeyboard;
+
+  /// Field caption — the native field's `labelText` and the in-app panel's
+  /// caption — so the same dialog reads 'Name' or 'Commander' as reused.
+  final String label;
 
   @override
   State<_NameEditDialog> createState() => _NameEditDialogState();
@@ -1301,28 +1360,22 @@ class _NameEditDialogState extends State<_NameEditDialog> {
       // No OS keyboard rises in this mode, so there is no inset to dodge: center
       // the rotated panel (preview + field + keys) so it faces the seat, and let
       // the FittedBox shrink it to fit tall side-seat (q1/q3) rotations.
-      return LayoutBuilder(
-        builder: (context, constraints) {
-          return Align(
-            alignment: Alignment.center,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: constraints.maxWidth - 32,
-                  maxHeight: constraints.maxHeight - 32,
-                ),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: RotatedBox(
-                    quarterTurns: widget.quarterTurns,
-                    child: SizedBox(width: 320, child: _inAppPanel()),
-                  ),
-                ),
-              ),
+      // Fill the screen with the rotated keyboard. A FittedBox only scales its
+      // child UP when it is given tight constraints; SizedBox.expand supplies
+      // them (an Align/loose parent would leave the panel at its natural size,
+      // which is why it looked small before). contain then scales the rotated
+      // panel to fill as much of the screen as its aspect ratio allows.
+      return Padding(
+        padding: const EdgeInsets.all(8),
+        child: SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: RotatedBox(
+              quarterTurns: widget.quarterTurns,
+              child: SizedBox(width: 320, child: _inAppPanel()),
             ),
-          );
-        },
+          ),
+        ),
       );
     }
     // The OS keyboard rises from the bottom; drop its height from the usable area
@@ -1370,6 +1423,17 @@ class _NameEditDialogState extends State<_NameEditDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Text(
+              widget.label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: LifeTapColors.textSecondary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 8),
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: _controller,
               builder: (context, value, _) {
@@ -1480,7 +1544,7 @@ class _NameEditDialogState extends State<_NameEditDialog> {
               autofocus: true,
               textAlign: TextAlign.center,
               textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(labelText: 'Name'),
+              decoration: InputDecoration(labelText: widget.label),
               onSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: 12),
