@@ -138,4 +138,76 @@ void main() {
       expect(state.player(0).color, 0xFF00FF00);
     });
   });
+
+  group('table statuses', () {
+    test('SetMonarch is single-holder: a new player moves it, not both', () {
+      var state = _newGame(players: 4);
+      state = const SetMonarch(playerId: 1).apply(state);
+      expect(state.monarchId, 1);
+
+      state = const SetMonarch(playerId: 2).apply(state);
+      expect(state.monarchId, 2, reason: 'monarch moves off the prior holder');
+      expect(state.initiativeId, isNull);
+    });
+
+    test('SetMonarch(null) clears the monarch', () {
+      var state = _newGame();
+      state = const SetMonarch(playerId: 0).apply(state);
+      state = const SetMonarch().apply(state);
+      expect(state.monarchId, isNull);
+    });
+
+    test('SetInitiative is independent of the Monarch field', () {
+      var state = _newGame(players: 4);
+      state = const SetMonarch(playerId: 1).apply(state);
+      state = const SetInitiative(playerId: 3).apply(state);
+
+      expect(state.monarchId, 1);
+      expect(state.initiativeId, 3);
+    });
+
+    test('CycleDayNight cycles none -> day -> night -> none', () {
+      var state = _newGame();
+      expect(state.dayNight, DayNight.none);
+
+      state = const CycleDayNight().apply(state);
+      expect(state.dayNight, DayNight.day);
+      state = const CycleDayNight().apply(state);
+      expect(state.dayNight, DayNight.night);
+      state = const CycleDayNight().apply(state);
+      expect(state.dayNight, DayNight.none);
+    });
+
+    test('a per-player mutation preserves the global status fields', () {
+      var state = _newGame(players: 4);
+      state = const SetMonarch(playerId: 1).apply(state);
+      state = const SetInitiative(playerId: 2).apply(state);
+      state = const CycleDayNight().apply(state);
+
+      // Life adjustment flows through replacePlayer; the game-wide statuses
+      // must survive it.
+      state = const AdjustCounter(
+        playerId: 0,
+        mode: CounterMode.life,
+        delta: -3,
+      ).apply(state);
+
+      expect(state.monarchId, 1);
+      expect(state.initiativeId, 2);
+      expect(state.dayNight, DayNight.day);
+    });
+
+    test('NewGame resets monarch, initiative, and day/night', () {
+      var state = _newGame(players: 4);
+      state = const SetMonarch(playerId: 0).apply(state);
+      state = const SetInitiative(playerId: 1).apply(state);
+      state = const CycleDayNight().apply(state);
+
+      state = NewGame(playerCount: 4, startingLife: 40).apply(state);
+
+      expect(state.monarchId, isNull);
+      expect(state.initiativeId, isNull);
+      expect(state.dayNight, DayNight.none);
+    });
+  });
 }

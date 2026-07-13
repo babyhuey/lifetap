@@ -43,4 +43,29 @@ void main() {
       1,
     );
   });
+
+  testWidgets('tapping Monarch in the counters popup marks that player as the '
+      'single-holder monarch', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: GameScreen()),
+      ),
+    );
+    await tester.pump();
+
+    // Nobody holds the monarch at the start of a fresh game.
+    expect(container.read(gameProvider).current.monarchId, isNull);
+
+    // Open player 0's counters popup and tap the Monarch status tile.
+    await tester.tap(find.byKey(const ValueKey('counters-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Monarch'));
+    await tester.pump();
+
+    expect(container.read(gameProvider).current.monarchId, 0);
+  });
 }

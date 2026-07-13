@@ -2,6 +2,10 @@ import 'package:flutter/foundation.dart';
 
 enum CounterMode { life, poison, energy, experience }
 
+/// The table-wide day/night state. Global (not per-player) and cycled through
+/// [none] → [day] → [night] → [none].
+enum DayNight { none, day, night }
+
 /// Sentinel so [PlayerState.copyWith] can tell "leave unchanged" apart from
 /// "set to null" for the nullable commander fields.
 const Object _unset = Object();
@@ -88,19 +92,53 @@ class PlayerState {
 
 @immutable
 class GameState {
-  const GameState({required this.players, required this.startingLife});
+  const GameState({
+    required this.players,
+    required this.startingLife,
+    this.monarchId,
+    this.initiativeId,
+    this.dayNight = DayNight.none,
+  });
 
   final List<PlayerState> players;
   final int startingLife;
+
+  /// Single-holder table statuses: the id of the player who currently holds the
+  /// Monarch / the Initiative, or null when nobody does. Game-wide, not
+  /// per-player.
+  final int? monarchId;
+  final int? initiativeId;
+
+  /// Table-wide day/night state.
+  final DayNight dayNight;
 
   int get playerCount => players.length;
 
   PlayerState player(int id) => players.firstWhere((p) => p.id == id);
 
-  GameState replacePlayer(PlayerState updated) {
+  GameState copyWith({
+    List<PlayerState>? players,
+    int? startingLife,
+    Object? monarchId = _unset,
+    Object? initiativeId = _unset,
+    DayNight? dayNight,
+  }) {
     return GameState(
+      players: players ?? this.players,
+      startingLife: startingLife ?? this.startingLife,
+      monarchId: identical(monarchId, _unset)
+          ? this.monarchId
+          : monarchId as int?,
+      initiativeId: identical(initiativeId, _unset)
+          ? this.initiativeId
+          : initiativeId as int?,
+      dayNight: dayNight ?? this.dayNight,
+    );
+  }
+
+  GameState replacePlayer(PlayerState updated) {
+    return copyWith(
       players: [for (final p in players) p.id == updated.id ? updated : p],
-      startingLife: startingLife,
     );
   }
 }
