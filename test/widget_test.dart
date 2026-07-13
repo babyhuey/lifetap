@@ -4,15 +4,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lifetap/ui/game_screen.dart';
 
 void main() {
-  testWidgets('GameScreen boots with two players at 20 life', (tester) async {
+  testWidgets('GameScreen boots with four players at 20 life', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(child: MaterialApp(home: GameScreen())),
     );
     await tester.pump();
 
-    // Two seats, both showing the default 20 life.
-    expect(find.text('20'), findsNWidgets(2));
+    // Four seats, all showing the default 20 life.
+    expect(find.text('20'), findsNWidgets(4));
     expect(find.text('P1'), findsOneWidget);
-    expect(find.text('P2'), findsOneWidget);
+    expect(find.text('P4'), findsOneWidget);
   });
 }
