@@ -221,3 +221,56 @@ class RecolorPlayer extends GameEvent {
   String describe(GameState before) =>
       '${before.player(playerId).name} recolored';
 }
+
+/// Sets the single-holder Monarch to [playerId], or clears it when null.
+/// Because the holder is one game-wide field, moving it to a new player
+/// automatically takes it off whoever held it before.
+class SetMonarch extends GameEvent {
+  const SetMonarch({this.playerId});
+
+  final int? playerId;
+
+  @override
+  GameState apply(GameState state) => state.copyWith(monarchId: playerId);
+
+  @override
+  String describe(GameState before) => playerId == null
+      ? 'Monarch cleared'
+      : '${before.player(playerId!).name} became monarch';
+}
+
+/// Sets the single-holder Initiative to [playerId], or clears it when null.
+/// Independent of the Monarch field, same single-holder move semantics.
+class SetInitiative extends GameEvent {
+  const SetInitiative({this.playerId});
+
+  final int? playerId;
+
+  @override
+  GameState apply(GameState state) => state.copyWith(initiativeId: playerId);
+
+  @override
+  String describe(GameState before) => playerId == null
+      ? 'Initiative cleared'
+      : '${before.player(playerId!).name} took the initiative';
+}
+
+/// Advances the table-wide day/night state one step: none → day → night → none.
+class CycleDayNight extends GameEvent {
+  const CycleDayNight();
+
+  @override
+  GameState apply(GameState state) =>
+      state.copyWith(dayNight: _nextDayNight(state.dayNight));
+
+  @override
+  String describe(GameState before) =>
+      'Day/Night: ${_nextDayNight(before.dayNight).name}';
+}
+
+/// The next state in the day/night cycle.
+DayNight _nextDayNight(DayNight current) => switch (current) {
+  DayNight.none => DayNight.day,
+  DayNight.day => DayNight.night,
+  DayNight.night => DayNight.none,
+};

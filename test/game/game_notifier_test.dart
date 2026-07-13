@@ -69,4 +69,45 @@ void main() {
     expect(lines[1], contains('life +5'));
     expect(lines[2], contains('poison +2'));
   });
+
+  test('toggleMonarch moves the single holder and clears on re-select', () {
+    notifier().newGame(4, 40);
+
+    notifier().toggleMonarch(1);
+    expect(session().current.monarchId, 1);
+
+    notifier().toggleMonarch(2);
+    expect(session().current.monarchId, 2, reason: 'moves off player 1');
+
+    notifier().toggleMonarch(2);
+    expect(
+      session().current.monarchId,
+      isNull,
+      reason: 're-selecting the holder clears it',
+    );
+  });
+
+  test('toggleInitiative is independent of the monarch', () {
+    notifier().newGame(4, 40);
+
+    notifier().toggleMonarch(0);
+    notifier().toggleInitiative(3);
+    expect(session().current.monarchId, 0);
+    expect(session().current.initiativeId, 3);
+
+    notifier().toggleInitiative(3);
+    expect(session().current.initiativeId, isNull);
+    expect(session().current.monarchId, 0, reason: 'monarch untouched');
+  });
+
+  test('cycleDayNight advances the global state and undo reverses it', () {
+    notifier().newGame(2, 20);
+    expect(session().current.dayNight, DayNight.none);
+
+    notifier().cycleDayNight();
+    expect(session().current.dayNight, DayNight.day);
+
+    notifier().undo();
+    expect(session().current.dayNight, DayNight.none);
+  });
 }

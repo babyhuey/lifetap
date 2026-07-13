@@ -106,7 +106,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(gameProvider);
-    final players = session.current.players;
+    final game = session.current;
+    final players = game.players;
 
     return Scaffold(
       backgroundColor: LifeTapColors.background,
@@ -224,10 +225,38 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                     ),
                   ),
                 ),
+              // Monarch / Initiative badges float over the holder's zone near
+              // the name pill, seat-rotated to face them. Wrapped in an
+              // IgnorePointer so they never intercept a life tap; only shown for
+              // whoever currently holds each status.
+              for (var i = 0; i < players.length; i++)
+                if (game.monarchId == players[i].id ||
+                    game.initiativeId == players[i].id)
+                  Positioned.fromRect(
+                    rect: rects[i],
+                    child: IgnorePointer(
+                      child: RotatedBox(
+                        quarterTurns: turns[i],
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 48),
+                            child: _ZoneStatusBadges(
+                              monarch: game.monarchId == players[i].id,
+                              initiative: game.initiativeId == players[i].id,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               Positioned.fromRect(
                 rect: layout.toolbar,
                 child: _Toolbar(
                   playerCount: players.length,
+                  dayNight: game.dayNight,
+                  onDayNight: () =>
+                      ref.read(gameProvider.notifier).cycleDayNight(),
                   onSettings: _openSettings,
                   onUndo: () => ref.read(gameProvider.notifier).undo(),
                   onDice: _showDice,
@@ -1010,6 +1039,54 @@ class _PlayerNameLabel extends StatelessWidget {
   }
 }
 
+/// Display-only status badges (crown for Monarch, medal for Initiative) shown
+/// over the holder's zone near the name pill. Rendered inside the seat's
+/// [RotatedBox] so they face the player and inside an [IgnorePointer] so they
+/// never consume a life tap. Only the badges for statuses this player holds are
+/// built.
+class _ZoneStatusBadges extends StatelessWidget {
+  const _ZoneStatusBadges({required this.monarch, required this.initiative});
+
+  final bool monarch;
+  final bool initiative;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (monarch) const _ZoneStatusBadge(emoji: '👑'),
+        if (monarch && initiative) const SizedBox(width: 6),
+        if (initiative) const _ZoneStatusBadge(icon: Icons.military_tech),
+      ],
+    );
+  }
+}
+
+/// One round status badge: a Unicode [emoji] glyph or a Material [icon] on a
+/// translucent-black disc so it reads over both art and near-black zones.
+class _ZoneStatusBadge extends StatelessWidget {
+  const _ZoneStatusBadge({this.emoji, this.icon});
+
+  final String? emoji;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.6),
+        shape: BoxShape.circle,
+        border: Border.all(color: LifeTapColors.accent, width: 1.5),
+      ),
+      child: emoji != null
+          ? Text(emoji!, style: const TextStyle(fontSize: 16))
+          : Icon(icon, size: 16, color: LifeTapColors.accent),
+    );
+  }
+}
+
 /// A rotated modal sheet (readable from the player's seat) to rename the
 /// player, set their commander (resolving art on submit), and recolor.
 class _PlayerSettingsSheet extends ConsumerStatefulWidget {
@@ -1607,6 +1684,8 @@ class _DiceShapePainter extends CustomPainter {
 class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.playerCount,
+    required this.dayNight,
+    required this.onDayNight,
     required this.onSettings,
     required this.onUndo,
     required this.onDice,
@@ -1615,6 +1694,8 @@ class _Toolbar extends StatelessWidget {
   });
 
   final int playerCount;
+  final DayNight dayNight;
+  final VoidCallback onDayNight;
   final VoidCallback onSettings;
   final VoidCallback onUndo;
   final VoidCallback onDice;
@@ -1652,6 +1733,24 @@ class _Toolbar extends StatelessWidget {
             color: Colors.white,
             onPressed: onCoin,
             icon: const Icon(Icons.monetization_on),
+          ),
+          IconButton(
+            tooltip: 'Day/Night',
+            onPressed: onDayNight,
+            icon: switch (dayNight) {
+              DayNight.none => Icon(
+                Icons.brightness_medium,
+                color: Colors.white.withValues(alpha: 0.35),
+              ),
+              DayNight.day => const Icon(
+                Icons.wb_sunny,
+                color: Color(0xFFFDD835),
+              ),
+              DayNight.night => const Icon(
+                Icons.nightlight_round,
+                color: LifeTapColors.accent,
+              ),
+            },
           ),
           IconButton(
             tooltip: 'History',
@@ -1993,7 +2092,8 @@ class _CountersPopupState extends ConsumerState<_CountersPopup> {
 
   @override
   Widget build(BuildContext context) {
-    final player = ref.watch(gameProvider).current.player(widget.playerId);
+    final game = ref.watch(gameProvider).current;
+    final player = game.player(widget.playerId);
     return Center(
       child: RotatedBox(
         quarterTurns: widget.quarterTurns,
@@ -2015,7 +2115,7 @@ class _CountersPopupState extends ConsumerState<_CountersPopup> {
                   Flexible(
                     child: SingleChildScrollView(
                       child: _tab == _CounterTab.counters
-                          ? _countersBody(player)
+                          ? _countersBody(game, player)
                           : _playerBody(player),
                     ),
                   ),
@@ -2099,7 +2199,7 @@ class _CountersPopupState extends ConsumerState<_CountersPopup> {
     );
   }
 
-  Widget _countersBody(PlayerState player) {
+  Widget _countersBody(GameState game, PlayerState player) {
     final all = [..._standardCounterTypes, ..._genericCounterTypes];
     final active = [
       for (final t in all)
@@ -2112,6 +2212,7 @@ class _CountersPopupState extends ConsumerState<_CountersPopup> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _statusSection(game, player),
         if (active.isNotEmpty) ...[
           _sectionLabel('Active'),
           const SizedBox(height: 10),
@@ -2132,6 +2233,99 @@ class _CountersPopupState extends ConsumerState<_CountersPopup> {
           children: [for (final t in inactive) _paletteTile(t)],
         ),
       ],
+    );
+  }
+
+  /// The single-holder / global status row: Monarch and Initiative toggle onto
+  /// this player, Day/Night cycles the table-wide state. Each highlights when
+  /// active (this player holds it, or day/night is set) and routes through the
+  /// notifier so undo/history stay correct.
+  Widget _statusSection(GameState game, PlayerState player) {
+    final notifier = ref.read(gameProvider.notifier);
+    final (
+      IconData dnIcon,
+      String dnLabel,
+      bool dnActive,
+    ) = switch (game.dayNight) {
+      DayNight.none => (Icons.brightness_medium, 'Day/Night', false),
+      DayNight.day => (Icons.wb_sunny, 'Day', true),
+      DayNight.night => (Icons.nightlight_round, 'Night', true),
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionLabel('Status'),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            _statusTile(
+              icon: Icons.workspace_premium,
+              label: 'Monarch',
+              active: game.monarchId == player.id,
+              onTap: () => notifier.toggleMonarch(player.id),
+            ),
+            _statusTile(
+              icon: Icons.military_tech,
+              label: 'Initiative',
+              active: game.initiativeId == player.id,
+              onTap: () => notifier.toggleInitiative(player.id),
+            ),
+            _statusTile(
+              icon: dnIcon,
+              label: dnLabel,
+              active: dnActive,
+              onTap: notifier.cycleDayNight,
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+      ],
+    );
+  }
+
+  Widget _statusTile({
+    required IconData icon,
+    required String label,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        width: 92,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        decoration: BoxDecoration(
+          color: active ? LifeTapColors.accent : _PopupColors.tile,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: active ? LifeTapColors.accent : _PopupColors.tileBorder,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: active ? Colors.white : _PopupColors.textPrimary,
+              size: 24,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: active ? Colors.white : _PopupColors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

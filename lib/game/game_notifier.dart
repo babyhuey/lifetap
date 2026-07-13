@@ -36,6 +36,23 @@ class GameNotifier extends Notifier<GameSession> {
     state = GameSession(current: _fold(history), history: history);
   }
 
+  /// Toggles the Monarch on [playerId]: clears it if they already hold it,
+  /// otherwise moves it to them (single-holder).
+  void toggleMonarch(int playerId) {
+    final held = state.current.monarchId == playerId;
+    dispatch(SetMonarch(playerId: held ? null : playerId));
+  }
+
+  /// Toggles the Initiative on [playerId], with the same single-holder
+  /// semantics as [toggleMonarch] but an independent field.
+  void toggleInitiative(int playerId) {
+    final held = state.current.initiativeId == playerId;
+    dispatch(SetInitiative(playerId: held ? null : playerId));
+  }
+
+  /// Advances the table-wide day/night state one step.
+  void cycleDayNight() => dispatch(const CycleDayNight());
+
   /// Drops the most recent event and re-folds from scratch. Re-folding is what
   /// makes undo correct for events whose effect depends on prior state
   /// (clamped counters, commander-damage-with-life).
