@@ -152,6 +152,24 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                     ),
                   ),
                 ),
+              // Name labels also sit above the Listener so tapping a name opens
+              // the rename editor instead of the router reading it as a life
+              // tap. Only the label's hit area is consumed; the rest of the
+              // cell falls through to the router below.
+              for (var i = 0; i < players.length; i++)
+                Positioned.fromRect(
+                  rect: rects[i],
+                  child: RotatedBox(
+                    quarterTurns: turns[i],
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: _PlayerNameLabel(
+                        name: players[i].name,
+                        onTap: () => _editName(players[i].id),
+                      ),
+                    ),
+                  ),
+                ),
               Positioned(
                 left: 0,
                 right: 0,
@@ -242,6 +260,24 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           _PlayerSettingsSheet(playerId: playerId, quarterTurns: quarterTurns),
     );
   }
+
+  /// Opens an upright (never seat-rotated) dialog to rename the player. Keeping
+  /// it screen-oriented — unlike the seat-rotated name label that opened it —
+  /// means the field and keyboard are easy to type on. Landscape stays locked
+  /// (set in main.dart); nothing here reorients when the field is focused.
+  Future<void> _editName(int playerId) async {
+    final current = ref.read(gameProvider).current.player(playerId).name;
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => _NameEditDialog(initialName: current),
+    );
+    if (name == null) return; // cancelled or dismissed by an outside tap
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    ref
+        .read(gameProvider.notifier)
+        .dispatch(RenamePlayer(playerId: playerId, name: trimmed));
+  }
 }
 
 /// Column-major grid: 1 column for 2 players, otherwise 2 columns. The last row
@@ -314,10 +350,6 @@ class _PlayerZone extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    player.name,
-                    style: const TextStyle(color: Colors.white70, fontSize: 18),
-                  ),
-                  Text(
                     '${player.life}',
                     style: TextStyle(
                       color: Colors.white,
@@ -338,6 +370,35 @@ class _PlayerZone extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The tappable player-name label pinned to the top edge of a zone. It carries
+/// [HitTestBehavior.opaque] so its own hit area consumes taps (opening the
+/// rename editor) while the surrounding cell falls through to the life router.
+class _PlayerNameLabel extends StatelessWidget {
+  const _PlayerNameLabel({required this.name, required this.onTap});
+
+  final String name;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        child: Text(
+          name,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
@@ -472,6 +533,54 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Upright, screen-centered rename dialog. Held deliberately at the normal
+/// screen orientation (quarterTurns 0) — not rotated to the seat — with an
+/// autofocused field prefilled with the current name. Confirm pops the new
+/// name; an outside tap or Cancel pops null and leaves the name unchanged.
+class _NameEditDialog extends StatefulWidget {
+  const _NameEditDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_NameEditDialog> createState() => _NameEditDialogState();
+}
+
+class _NameEditDialogState extends State<_NameEditDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialName,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() => Navigator.of(context).pop(_controller.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Player name'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textInputAction: TextInputAction.done,
+        decoration: const InputDecoration(labelText: 'Name'),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Done')),
+      ],
     );
   }
 }
