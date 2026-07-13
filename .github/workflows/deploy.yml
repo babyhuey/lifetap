@@ -24,7 +24,10 @@ jobs:
       - run: git config --global --add safe.directory '*'
       - run: flutter pub get
       - name: Build web
-        run: flutter build web --release --base-href /lifetap/
+        # --pwa-strategy=none skips the Flutter service worker so deploys aren't
+        # hidden behind an offline cache that ignores refreshes. Trades offline
+        # support for changes showing up on a normal reload.
+        run: flutter build web --release --base-href /lifetap/ --pwa-strategy=none
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
