@@ -185,11 +185,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                     ),
                   ),
                 ),
-              // The commander-damage cells sit above the Listener as ONE
-              // egocentric map per player, anchored in that player's OWN
-              // bottom-right corner and rotated to face them. Because the map
-              // lives inside the seat's RotatedBox, Align.bottomRight lands it
-              // in the player's own corner facing them. Only each cell's hit
+              // The commander-damage cells sit above the Listener as a fixed
+              // north-up mini-map of the table: the same seating order for every
+              // seat (index 0 = top-left cell, etc.), NOT rotated to the player,
+              // so the map reads the same from any seat. Only each cell's
+              // number/label rotates to face its owner (see the grid below).
+              // Anchored to the bottom-right of each zone. Only each cell's hit
               // area is consumed; the transparent rest of the Align falls
               // through to the Listener below (same pattern as the
               // gear/counters/name overlays).
@@ -197,7 +198,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 Positioned.fromRect(
                   rect: rects[i],
                   child: RotatedBox(
-                    quarterTurns: turns[i],
+                    quarterTurns: 0,
                     child: Align(
                       alignment: Alignment.bottomRight,
                       child: Padding(
@@ -344,9 +345,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   /// of them. Each opponent tile shows that opponent's art/color plus this
   /// player's commander damage from them (tap +1 / long-press −1, clamped ≥ 0,
   /// 21+ flags red); the "me" tile shows the player's own art/color and a "me"
-  /// label and opens their settings. The caller places this map inside the
-  /// seat's [RotatedBox] at the bottom-right corner, so each tile passes
-  /// `quarterTurns: 0` (no double rotation) and the whole map faces the player.
+  /// label and opens their settings. The caller anchors this map at the zone's
+  /// bottom-right WITHOUT seat rotation, so the map reads north-up from every
+  /// seat; each tile passes `quarterTurns: turns[index]` so only its
+  /// number/label rotates to face this player.
   Widget _commanderDamageGrid(
     List<PlayerState> players,
     int index,
@@ -368,7 +370,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
               _CommanderDamageSquare(
                 key: ValueKey('cmdr-me-${me.id}'),
                 size: _cmdrCellSize,
-                quarterTurns: 0,
+                quarterTurns: turns[index],
                 color: Color(me.color),
                 artUrl: me.artUrl,
                 label: 'me',
@@ -379,7 +381,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
               _CommanderDamageSquare(
                 key: ValueKey('cmdr-${me.id}-${players[j].id}'),
                 size: _cmdrCellSize,
-                quarterTurns: 0,
+                quarterTurns: turns[index],
                 color: Color(players[j].color),
                 artUrl: players[j].artUrl,
                 value: me.commanderDamage[players[j].id] ?? 0,
