@@ -34,8 +34,9 @@ docker run --rm -v "$PWD":/app -w /app "$IMG" chown -R "$(id -u)":"$(id -g)" /ap
 
 ## CI
 
-`.gitlab-ci.yml` runs three stages in the same container:
+GitHub Actions runs everything in the same pinned Flutter container (`.github/workflows/`):
 
-1. **lint** — `dart format --set-exit-if-changed` + `flutter analyze`.
-2. **test** — `flutter test --coverage`; results converted to a JUnit report (`tool/junit_report.dart`) shown on the MR, plus an lcov coverage artifact.
-3. **integration** — `flutter test integration_test -d linux` under `xvfb`, booting the real app and injecting pointer events (no emulator / KVM needed).
+- **`ci.yml`** — `test` job: `dart format --set-exit-if-changed` + `flutter analyze` + `flutter test --coverage` (lcov artifact). `integration` job: `flutter test integration_test -d linux` under `xvfb`, booting the real app and injecting pointer events (no emulator / KVM needed).
+- **`deploy.yml`** — builds `flutter build web` and publishes to GitHub Pages (`https://babyhuey.github.io/lifetap/`) on every push to `main`, so the app is installable on an iPad as a PWA.
+
+`tool/junit_report.dart` converts `flutter test --machine` output to JUnit XML for any CI that consumes it.

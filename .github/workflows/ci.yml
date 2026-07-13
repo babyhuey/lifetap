@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: ghcr.io/cirruslabs/flutter:3.44.0
+    steps:
+      - uses: actions/checkout@v4
+      - run: git config --global --add safe.directory '*'
+      - run: flutter pub get
+      - name: Format
+        run: dart format --set-exit-if-changed lib test tool integration_test
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+      - name: Unit + widget tests
+        run: flutter test --coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/lcov.info
+
+  integration:
+    runs-on: ubuntu-latest
+    container: ghcr.io/cirruslabs/flutter:3.44.0
+    steps:
+      - uses: actions/checkout@v4
+      - run: git config --global --add safe.directory '*'
+      - name: Linux desktop toolchain
+        run: apt-get update -qq && apt-get install -y -qq xvfb libgtk-3-dev ninja-build clang cmake pkg-config liblzma-dev
+      - run: flutter pub get
+      - run: flutter config --enable-linux-desktop
+      - name: Integration tests (headless)
+        run: xvfb-run -a flutter test integration_test -d linux
