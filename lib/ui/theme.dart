@@ -6,6 +6,7 @@ abstract final class LifeTapColors {
   static const background = Color(0xFF000000);
   static const accent = Color(0xFF33C7F0);
   static const surface = Color(0xFF141414);
+  static const emptyZone = Color(0xFF0D0D0D);
   static const chip = Color(0xFF1E1E1E);
   static const chipUnselected = Color(0xFF2A2A2A);
   static const divider = Color(0xFF2C2C2C);

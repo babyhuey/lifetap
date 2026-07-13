@@ -10,10 +10,11 @@ sealed class PointerResult {
   final int zoneId;
 }
 
-/// A tap in [zoneId]. [magnitude] is signed: negative for a tap in the left
-/// half of the zone, positive for the right half. Its size encodes the
-/// multi-finger count (1 finger = 1, 2 = 5, 3+ = 10). Hold auto-repeats reuse
-/// this result, carrying the accelerating step as the (signed) magnitude.
+/// A tap in [zoneId]. [magnitude] is signed: negative for a tap to the seated
+/// player's left, positive to their right (resolved in the zone's own upright
+/// frame, not the screen's). Its size encodes the multi-finger count (1 finger
+/// = 1, 2 = 5, 3+ = 10). Hold auto-repeats reuse this result, carrying the
+/// accelerating step as the (signed) magnitude.
 class TapResult extends PointerResult {
   const TapResult(super.zoneId, this.magnitude);
 
@@ -65,12 +66,14 @@ class PointerRouter {
   PointerRouter({
     required this.onResult,
     List<Rect> zones = const [],
+    List<int> zoneTurns = const [],
     this.dragThreshold = 24.0,
     this.stepSize = 24.0,
     this.tapMaxHold = const Duration(milliseconds: 800),
     this.holdThreshold = const Duration(milliseconds: 300),
     Duration Function()? clock,
   }) : zones = List.of(zones),
+       zoneTurns = List.of(zoneTurns),
        clock = clock ?? _monotonic;
 
   static final Stopwatch _stopwatch = Stopwatch()..start();
@@ -79,6 +82,13 @@ class PointerRouter {
   /// Zone rectangles in the same coordinate space the caller feeds positions
   /// in. Mutable so the UI can update it on layout changes.
   List<Rect> zones;
+
+  /// Quarter-turn rotation of each zone's seat, parallel to [zones]. A tap's
+  /// sign is resolved in the zone's own upright frame using this value, so
+  /// left/right is from the seated player's viewpoint rather than the screen's.
+  /// A zone with no entry defaults to 0 (upright), preserving physical
+  /// left/right.
+  List<int> zoneTurns;
 
   final void Function(PointerResult result) onResult;
 
@@ -109,6 +119,24 @@ class PointerRouter {
       if (zones[i].contains(p)) return i;
     }
     return null;
+  }
+
+  /// Sign of a tap at [p] within [zone], resolved in the zone's own upright
+  /// frame: the point is rotated by −q·90° about the zone center (q being the
+  /// zone's quarter-turns) so left-from-the-seat reads −1 and right-from-the-
+  /// seat reads +1, whatever direction the seat faces.
+  int _signAt(Offset p, int zone) {
+    final q = zone < zoneTurns.length ? zoneTurns[zone] & 3 : 0;
+    final c = zones[zone].center;
+    final dx = p.dx - c.dx;
+    final dy = p.dy - c.dy;
+    final rx = switch (q) {
+      1 => dy,
+      2 => -dx,
+      3 => -dy,
+      _ => dx,
+    };
+    return rx < 0 ? -1 : 1;
   }
 
   void down(int pointerId, Offset position) {
@@ -142,9 +170,9 @@ class PointerRouter {
       final step = p.hold.poll(now);
       if (step == 0) continue;
       p.repeated = true;
-      // Sign by PHYSICAL left/right of the zone rect (left = −, right = +).
-      final leftHalf = p.downPos.dx < zones[p.zone].center.dx;
-      onResult(TapResult(p.zone, leftHalf ? -step : step));
+      // Same per-seat sign as a one-shot tap so a held finger repeats in the
+      // direction the seated player expects.
+      onResult(TapResult(p.zone, step * _signAt(p.downPos, p.zone)));
     }
   }
 
@@ -182,12 +210,9 @@ class PointerRouter {
         .toList();
     final fingerCount = peers.length + 1;
     final magnitude = fingerCount >= 3 ? 10 : (fingerCount == 2 ? 5 : 1);
-    // Sign by PHYSICAL left/right of the zone rect: left half −, right half +.
-    // NOTE: for seats rotated 180/90/270 the player's perceived left/right
-    // differs from physical; a separate per-seat direction fix is planned, so
-    // classification stays physical here for now.
-    final leftHalf = p.downPos.dx < zones[p.zone].center.dx;
-    onResult(TapResult(p.zone, leftHalf ? -magnitude : magnitude));
+    // Sign in the zone's own upright frame (see [_signAt]) so the seated
+    // player's left is − and right is +, regardless of how the seat is rotated.
+    onResult(TapResult(p.zone, magnitude * _signAt(p.downPos, p.zone)));
 
     // The other fingers of this tap must not each emit again.
     _consumed.addAll(peers);

@@ -14,8 +14,10 @@ import 'seat_layout.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
 
-/// Height reserved at the bottom for the toolbar so player zones never sit
-/// under it (and toolbar touches never route into a zone).
+/// Height reserved for the toolbar strip so player zones never sit under it
+/// (and toolbar touches never route into a zone). For 2/4/6 players the strip
+/// splits the screen between the top and bottom rows; for 3/5 it sits at the
+/// bottom.
 const double _toolbarHeight = 64.0;
 
 class GameScreen extends ConsumerStatefulWidget {
@@ -107,10 +109,11 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       body: LayoutBuilder(
         builder: (context, constraints) {
           final size = constraints.biggest;
-          final zoneArea = Size(size.width, size.height - _toolbarHeight);
-          final rects = _zoneRects(players.length, zoneArea);
-          _router.zones = rects;
+          final layout = _layout(players.length, size);
+          final rects = layout.zones;
           final turns = seatQuarterTurns(players.length);
+          _router.zones = rects;
+          _router.zoneTurns = turns;
 
           return Stack(
             children: [
@@ -169,16 +172,14 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       alignment: Alignment.topCenter,
                       child: _PlayerNameLabel(
                         name: players[i].name,
+                        color: Color(players[i].color),
                         onTap: () => _editName(players[i].id),
                       ),
                     ),
                   ),
                 ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: _toolbarHeight,
+              Positioned.fromRect(
+                rect: layout.toolbar,
                 child: _Toolbar(
                   playerCount: players.length,
                   onSettings: _openSettings,
@@ -255,6 +256,41 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 }
 
+/// Whether this player count splits into a top row and a bottom row with the
+/// toolbar strip between them (2/4/6). 3 and 5 have no clean middle split, so
+/// they keep the toolbar anchored at the bottom.
+bool _splitLayout(int count) => count == 2 || count == 4 || count == 6;
+
+/// The zone rectangles plus the toolbar rectangle for [count] players in a
+/// screen of [size]. For 2/4/6 the toolbar is a middle strip: the top row sits
+/// above it and the bottom row below, each row holding half the players. For
+/// 3/5 the toolbar is a bottom strip and the zones fill the area above it via
+/// [_zoneRects]. Either way the zones never overlap the strip, so a toolbar
+/// touch is outside every zone and cannot register as a life tap.
+({List<Rect> zones, Rect toolbar}) _layout(int count, Size size) {
+  if (_splitLayout(count)) {
+    final perRow = count ~/ 2;
+    final rowHeight = (size.height - _toolbarHeight) / 2;
+    final cellWidth = size.width / perRow;
+    final zones = <Rect>[];
+    for (var i = 0; i < count; i++) {
+      final row = i ~/ perRow; // 0 = top row, 1 = bottom row
+      final col = i % perRow;
+      final top = row == 0 ? 0.0 : rowHeight + _toolbarHeight;
+      zones.add(Rect.fromLTWH(col * cellWidth, top, cellWidth, rowHeight));
+    }
+    return (
+      zones: zones,
+      toolbar: Rect.fromLTWH(0, rowHeight, size.width, _toolbarHeight),
+    );
+  }
+  final zoneArea = Size(size.width, size.height - _toolbarHeight);
+  return (
+    zones: _zoneRects(count, zoneArea),
+    toolbar: Rect.fromLTWH(0, zoneArea.height, size.width, _toolbarHeight),
+  );
+}
+
 /// Column-major grid: 1 column for 2 players, otherwise 2 columns. The last row
 /// stretches its cells to fill the width when it holds fewer than a full row.
 List<Rect> _zoneRects(int count, Size size) {
@@ -304,10 +340,15 @@ class _PlayerZone extends ConsumerWidget {
     final art = player.artUrl;
 
     return DecoratedBox(
-      decoration: const BoxDecoration(
-        color: LifeTapColors.background,
+      // Without art the zone reads near-black and uses the player's color only
+      // as a border accent; with art it keeps the neutral divider hairline so
+      // the image itself carries the color.
+      decoration: BoxDecoration(
+        color: art != null ? LifeTapColors.background : LifeTapColors.emptyZone,
         border: Border.fromBorderSide(
-          BorderSide(color: LifeTapColors.divider, width: 1),
+          art != null
+              ? const BorderSide(color: LifeTapColors.divider, width: 1)
+              : BorderSide(color: base, width: 3),
         ),
       ),
       child: Stack(
@@ -336,16 +377,20 @@ class _PlayerZone extends ConsumerWidget {
                 ),
               ),
             ),
-          ] else
-            ColoredBox(color: solid),
-          // Faint decorative left = −, right = + hints in PHYSICAL zone space
-          // (the router signs taps by physical left/right, not seat facing), so
-          // these are deliberately not rotated with the seat content.
-          _EdgeHint(alignment: Alignment.centerLeft, icon: Icons.remove),
-          _EdgeHint(alignment: Alignment.centerRight, icon: Icons.add),
+          ],
+          // The ± hints and the life number share one rotated frame so they
+          // read from the player's seat: "−" lands on the player's actual left
+          // and "+" on their right, matching the router's per-seat tap sign.
           RotatedBox(
             quarterTurns: quarterTurns,
-            child: _ZoneContent(player: player, knockedOut: ko),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _EdgeHint(alignment: Alignment.centerLeft, icon: Icons.remove),
+                _EdgeHint(alignment: Alignment.centerRight, icon: Icons.add),
+                _ZoneContent(player: player, knockedOut: ko),
+              ],
+            ),
           ),
         ],
       ),
@@ -353,8 +398,9 @@ class _PlayerZone extends ConsumerWidget {
   }
 }
 
-/// A low-opacity ± glyph pinned to one vertical edge of the zone. Purely
-/// decorative: it adds no hit target, so taps fall through to the life router.
+/// A low-opacity ± glyph pinned to one side edge of the player's (rotated)
+/// frame. Purely decorative: it adds no hit target, so taps fall through to the
+/// life router.
 class _EdgeHint extends StatelessWidget {
   const _EdgeHint({required this.alignment, required this.icon});
 
@@ -511,9 +557,14 @@ class _CounterChip extends StatelessWidget {
 /// [HitTestBehavior.opaque] so its own hit area consumes taps (opening the
 /// rename editor) while the surrounding cell falls through to the life router.
 class _PlayerNameLabel extends StatelessWidget {
-  const _PlayerNameLabel({required this.name, required this.onTap});
+  const _PlayerNameLabel({
+    required this.name,
+    required this.color,
+    required this.onTap,
+  });
 
   final String name;
+  final Color color;
   final VoidCallback onTap;
 
   @override
@@ -526,7 +577,12 @@ class _PlayerNameLabel extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.6),
+            // Player's color at ~30% over a translucent-black base: a per-seat
+            // tint that stays legible over both near-black zones and art.
+            color: Color.alphaBlend(
+              color.withValues(alpha: 0.30),
+              Colors.black.withValues(alpha: 0.6),
+            ),
             borderRadius: BorderRadius.circular(18),
           ),
           child: Text(
@@ -752,8 +808,9 @@ class _RollDialog extends StatelessWidget {
   }
 }
 
-/// The slim bottom toolbar: white icon buttons plus a cyan-ringed badge showing
+/// The slim toolbar strip: white icon buttons plus a cyan-ringed badge showing
 /// the current player count. Reset and the badge both open the settings screen.
+/// Sits between the rows for 2/4/6 players and at the bottom for 3/5.
 class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.playerCount,

@@ -103,6 +103,88 @@ void main() {
     });
   });
 
+  group('PointerRouter per-seat tap sign', () {
+    // The same physical-left tap flips sign with the seat's facing: on an
+    // upright (q0) seat the player's left is the screen's left, but a 180°
+    // (q2) seat is upside-down, so the screen's left is that player's right.
+    test('physical left is − at q0 but + at q2', () {
+      final results = <PointerResult>[];
+      final router = PointerRouter(
+        zones: const [_zone0, _zone1],
+        zoneTurns: const [0, 2],
+        onResult: results.add,
+      );
+
+      // Physical-left column of each zone (x < center 50).
+      router.down(1, const Offset(20, 50)); // zone 0, q0
+      router.up(1, heldFor: _short);
+      router.down(2, const Offset(20, 150)); // zone 1, q2
+      router.up(2, heldFor: _short);
+
+      expect((results[0] as TapResult).magnitude, -1, reason: 'q0 left is −');
+      expect((results[1] as TapResult).magnitude, 1, reason: 'q2 left is +');
+    });
+
+    // Side-facing seats sign by vertical position: q1 faces right so the
+    // player's left is the screen's top; q3 faces left so their left is the
+    // screen's bottom.
+    test('q1 signs by vertical: top is −, bottom is +', () {
+      final results = <PointerResult>[];
+      final router = PointerRouter(
+        zones: const [_zone0],
+        zoneTurns: const [1],
+        onResult: results.add,
+      );
+
+      router.down(1, const Offset(50, 20)); // above center (y < 50)
+      router.up(1, heldFor: _short);
+      router.down(2, const Offset(50, 80)); // below center (y > 50)
+      router.up(2, heldFor: _short);
+
+      expect((results[0] as TapResult).magnitude, -1);
+      expect((results[1] as TapResult).magnitude, 1);
+    });
+
+    test('q3 signs by vertical opposite to q1: top is +, bottom is −', () {
+      final results = <PointerResult>[];
+      final router = PointerRouter(
+        zones: const [_zone0],
+        zoneTurns: const [3],
+        onResult: results.add,
+      );
+
+      router.down(1, const Offset(50, 20)); // above center
+      router.up(1, heldFor: _short);
+      router.down(2, const Offset(50, 80)); // below center
+      router.up(2, heldFor: _short);
+
+      expect((results[0] as TapResult).magnitude, 1);
+      expect((results[1] as TapResult).magnitude, -1);
+    });
+
+    test('held finger repeats in the seat frame (q2 physical-left is +)', () {
+      var now = Duration.zero;
+      final results = <PointerResult>[];
+      final router = PointerRouter(
+        zones: const [_zone0],
+        zoneTurns: const [2],
+        clock: () => now,
+        onResult: results.add,
+      );
+
+      router.down(1, const Offset(20, 50)); // physical left of a q2 seat
+      now = const Duration(milliseconds: 300);
+      router.tick();
+
+      expect(results, isNotEmpty);
+      expect(
+        results.every((r) => (r as TapResult).magnitude > 0),
+        isTrue,
+        reason: 'physical-left on an upside-down seat is the player\'s right',
+      );
+    });
+  });
+
   group('PointerRouter drag', () {
     test('a vertical drag yields a ScrubResult, not a tap', () {
       final results = <PointerResult>[];
