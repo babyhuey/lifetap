@@ -60,4 +60,36 @@ void main() {
     expect(after.commanderDamage[2], 1);
     expect(after.life, 40, reason: 'life is untouched when life-loss is off');
   });
+
+  testWidgets('each zone has a "me" identity holder; tapping it opens the '
+      "player's settings sheet and records no commander damage", (
+    tester,
+  ) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: GameScreen()),
+      ),
+    );
+    await tester.pump();
+
+    // A four-player game has one "me" holder per seat.
+    expect(find.byKey(const ValueKey('cmdr-me-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('cmdr-me-3')), findsOneWidget);
+
+    final before = container.read(gameProvider).current.player(0);
+
+    // Tapping "me" opens the rename/commander settings sheet, not a counter.
+    await tester.tap(find.byKey(const ValueKey('cmdr-me-0')));
+    await tester.pumpAndSettle();
+    expect(find.text('Commander'), findsOneWidget);
+
+    // It is a pure identity holder: no life or commander-damage change.
+    final after = container.read(gameProvider).current.player(0);
+    expect(after.commanderDamage, before.commanderDamage);
+    expect(after.life, before.life);
+  });
 }
