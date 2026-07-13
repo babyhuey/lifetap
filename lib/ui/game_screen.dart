@@ -185,8 +185,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                   ),
                 ),
               // The commander-damage cells sit above the Listener as ONE
-              // compact grid per player, anchored in that player's OWN
-              // bottom-right corner and rotated to face them. Because the grid
+              // egocentric map per player, anchored in that player's OWN
+              // bottom-right corner and rotated to face them. Because the map
               // lives inside the seat's RotatedBox, Align.bottomRight lands it
               // in the player's own corner facing them. Only each cell's hit
               // area is consumed; the transparent rest of the Align falls
@@ -201,7 +201,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       alignment: Alignment.bottomRight,
                       child: Padding(
                         padding: const EdgeInsets.all(10),
-                        child: _commanderDamageGrid(players, i, turns),
+                        child: _commanderDamageGrid(players, i, turns, rects),
                       ),
                     ),
                   ),
@@ -249,10 +249,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 
   Future<void> _showDice() async {
-    final roll = _rng.nextInt(20) + 1;
     await showDialog<void>(
       context: context,
-      builder: (context) => _RollDialog(title: 'd20', value: '$roll'),
+      builder: (context) => _DicePopup(rng: _rng),
     );
   }
 
@@ -300,31 +299,43 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         );
   }
 
-  /// The compact commander-damage grid for the player at [index]: a 2-column
-  /// [Wrap] holding one cell per player in seat (player-index) order, so the
-  /// grid reads as a mini-map of the table — for 4 players the cells fill a 2×2
-  /// that mirrors the `[top-left, top-right, bottom-left, bottom-right]` zone
-  /// layout, landing each player's tile in their own seat position. The current
-  /// player's own cell is their "me" identity holder (own art/color, "me"
-  /// label, opens their settings); every other cell is that opponent's tile
-  /// (their art/color plus this player's commander damage from them). The caller
-  /// places this grid inside the seat's [RotatedBox] at the bottom-right corner,
-  /// so each cell passes `quarterTurns: 0` (no double rotation) and the whole
-  /// mini-map faces the player in their own corner.
+  /// The egocentric commander-damage map for the player at [index]: a player's-
+  /// eye view of the table. The current player is at the NEAR side — their "me"
+  /// tile sits at the bottom — and every opponent is arrayed in a row ABOVE it,
+  /// ordered left-to-right exactly as this player sees them across the table.
+  ///
+  /// The left→right opponent order is recovered from the physical seat [rects]:
+  /// for each opponent O the vector `v = rectO.center - rectP.center` is rotated
+  /// out of screen space into P's own facing frame (un-rotating by P's
+  /// [seatQuarterTurns]); its x then increases from P's left to P's right, so
+  /// sorting opponents by that x lays them out the way P would see them.
+  ///
+  /// The opponent tiles flow in a [Wrap] so a wide row (5 opponents) can spill
+  /// to a second row rather than overflow, with the "me" tile always below all
+  /// of them. Each opponent tile shows that opponent's art/color plus this
+  /// player's commander damage from them (tap +1 / long-press −1, clamped ≥ 0,
+  /// 21+ flags red); the "me" tile shows the player's own art/color and a "me"
+  /// label and opens their settings. The caller places this map inside the
+  /// seat's [RotatedBox] at the bottom-right corner, so each tile passes
+  /// `quarterTurns: 0` (no double rotation) and the whole map faces the player.
   Widget _commanderDamageGrid(
     List<PlayerState> players,
     int index,
     List<int> turns,
+    List<Rect> rects,
   ) {
     final me = players[index];
+    // One cell per player in seat/index order → a 2-column grid that mirrors
+    // the on-screen seating (index 0 = top-left cell, etc.). The current
+    // player's cell is the "me" tile.
     return SizedBox(
       width: 2 * _cmdrCellSize + _cmdrCellGap,
       child: Wrap(
         spacing: _cmdrCellGap,
         runSpacing: _cmdrCellGap,
         children: [
-          for (final p in players)
-            if (p.id == me.id)
+          for (var j = 0; j < players.length; j++)
+            if (j == index)
               _CommanderDamageSquare(
                 key: ValueKey('cmdr-me-${me.id}'),
                 size: _cmdrCellSize,
@@ -337,15 +348,15 @@ class _GameScreenState extends ConsumerState<GameScreen> {
               )
             else
               _CommanderDamageSquare(
-                key: ValueKey('cmdr-${me.id}-${p.id}'),
+                key: ValueKey('cmdr-${me.id}-${players[j].id}'),
                 size: _cmdrCellSize,
                 quarterTurns: 0,
-                color: Color(p.color),
-                artUrl: p.artUrl,
-                value: me.commanderDamage[p.id] ?? 0,
-                onTap: () => _adjustCommanderDamage(me.id, p.id, 1),
-                onDecrement: (me.commanderDamage[p.id] ?? 0) > 0
-                    ? () => _adjustCommanderDamage(me.id, p.id, -1)
+                color: Color(players[j].color),
+                artUrl: players[j].artUrl,
+                value: me.commanderDamage[players[j].id] ?? 0,
+                onTap: () => _adjustCommanderDamage(me.id, players[j].id, 1),
+                onDecrement: (me.commanderDamage[players[j].id] ?? 0) > 0
+                    ? () => _adjustCommanderDamage(me.id, players[j].id, -1)
                     : null,
               ),
         ],
@@ -1284,6 +1295,310 @@ class _RollDialog extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The set of dice offered in the dice popup: the standard polyhedral set, each
+/// with the shape drawn on its tile and the number of sides it rolls.
+enum _DiceShape {
+  triangle,
+  squarePips,
+  diamond,
+  kite,
+  pentagon,
+  hexagon,
+  circle,
+}
+
+class _DieDef {
+  const _DieDef({
+    required this.label,
+    required this.sides,
+    required this.shape,
+  });
+  final String label;
+  final int sides;
+  final _DiceShape shape;
+}
+
+const List<_DieDef> _diceDefs = [
+  _DieDef(label: 'd4', sides: 4, shape: _DiceShape.triangle),
+  _DieDef(label: 'd6', sides: 6, shape: _DiceShape.squarePips),
+  _DieDef(label: 'd8', sides: 8, shape: _DiceShape.diamond),
+  _DieDef(label: 'd10', sides: 10, shape: _DiceShape.kite),
+  _DieDef(label: 'd12', sides: 12, shape: _DiceShape.pentagon),
+  _DieDef(label: 'd20', sides: 20, shape: _DiceShape.hexagon),
+];
+
+/// The dice-and-coins popup: a dark rounded modal with a tile per standard die
+/// (d4–d20, each drawn as its own painted shape) plus a coin. Tapping a die
+/// rolls a uniform 1..N from the shared [rng] and shows the result; tapping the
+/// coin shows Heads/Tails. All shapes are painted by [_DiceShapePainter] — no
+/// external assets.
+class _DicePopup extends StatefulWidget {
+  const _DicePopup({required this.rng});
+
+  final Random rng;
+
+  @override
+  State<_DicePopup> createState() => _DicePopupState();
+}
+
+class _DicePopupState extends State<_DicePopup> {
+  String? _resultLabel;
+  String? _resultValue;
+
+  void _roll(_DieDef die) {
+    setState(() {
+      _resultLabel = die.label;
+      _resultValue = '${widget.rng.nextInt(die.sides) + 1}';
+    });
+  }
+
+  void _flipCoin() {
+    setState(() {
+      _resultLabel = 'Coin';
+      _resultValue = widget.rng.nextBool() ? 'Heads' : 'Tails';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: LifeTapColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: SizedBox(
+        width: 300,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    'Dice & Coins',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Close',
+                    color: LifeTapColors.textSecondary,
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      for (final die in _diceDefs)
+                        _DiceTile(
+                          key: ValueKey('die-${die.label}'),
+                          label: die.label,
+                          shape: die.shape,
+                          onTap: () => _roll(die),
+                        ),
+                      _DiceTile(
+                        key: const ValueKey('die-coin'),
+                        label: 'Coin',
+                        shape: _DiceShape.circle,
+                        onTap: _flipCoin,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              _result(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _result() {
+    if (_resultValue == null) {
+      return const Text(
+        'Tap a die or coin to roll',
+        style: TextStyle(color: LifeTapColors.textSecondary, fontSize: 13),
+      );
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          _resultLabel!,
+          style: const TextStyle(
+            color: LifeTapColors.textSecondary,
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _resultValue!,
+          key: const ValueKey('dice-result'),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 40,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One dice/coin tile: its painted [shape] over the die [label], tappable to
+/// roll. Opaque so the whole tile is one hit target.
+class _DiceTile extends StatelessWidget {
+  const _DiceTile({
+    super.key,
+    required this.label,
+    required this.shape,
+    required this.onTap,
+  });
+
+  final String label;
+  final _DiceShape shape;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        width: 78,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: LifeTapColors.chip,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: LifeTapColors.divider),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 40,
+              height: 40,
+              child: CustomPaint(painter: _DiceShapePainter(shape)),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Draws each die's distinguishing outline (triangle=d4, pipped square=d6,
+/// diamond=d8, kite=d10, pentagon=d12, hexagon=d20, circle=coin) centered in
+/// the paint box, in the accent color with a faint fill — our own shapes, no
+/// image assets.
+class _DiceShapePainter extends CustomPainter {
+  const _DiceShapePainter(this.shape);
+
+  final _DiceShape shape;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = Paint()
+      ..color = LifeTapColors.accent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeJoin = StrokeJoin.round;
+    final fill = Paint()
+      ..color = LifeTapColors.accent.withValues(alpha: 0.12)
+      ..style = PaintingStyle.fill;
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = min(size.width, size.height) / 2 - 1;
+
+    void draw(Path path) {
+      canvas.drawPath(path, fill);
+      canvas.drawPath(path, stroke);
+    }
+
+    switch (shape) {
+      case _DiceShape.circle:
+        canvas.drawCircle(c, r, fill);
+        canvas.drawCircle(c, r, stroke);
+      case _DiceShape.triangle:
+        draw(_polygon(c, r, 3));
+      case _DiceShape.pentagon:
+        draw(_polygon(c, r, 5));
+      case _DiceShape.hexagon:
+        draw(_polygon(c, r, 6));
+      case _DiceShape.diamond:
+        draw(
+          Path()
+            ..moveTo(c.dx, c.dy - r)
+            ..lineTo(c.dx + r, c.dy)
+            ..lineTo(c.dx, c.dy + r)
+            ..lineTo(c.dx - r, c.dy)
+            ..close(),
+        );
+      case _DiceShape.kite:
+        draw(
+          Path()
+            ..moveTo(c.dx, c.dy - r)
+            ..lineTo(c.dx + r * 0.85, c.dy - r * 0.1)
+            ..lineTo(c.dx, c.dy + r)
+            ..lineTo(c.dx - r * 0.85, c.dy - r * 0.1)
+            ..close(),
+        );
+      case _DiceShape.squarePips:
+        final rect = RRect.fromRectAndRadius(
+          Rect.fromCenter(center: c, width: r * 1.7, height: r * 1.7),
+          const Radius.circular(4),
+        );
+        canvas.drawRRect(rect, fill);
+        canvas.drawRRect(rect, stroke);
+        final pip = Paint()..color = LifeTapColors.accent;
+        final d = r * 0.5;
+        for (final o in [
+          Offset(-d, -d),
+          Offset(d, -d),
+          Offset.zero,
+          Offset(-d, d),
+          Offset(d, d),
+        ]) {
+          canvas.drawCircle(c + o, r * 0.12, pip);
+        }
+    }
+  }
+
+  /// A regular [sides]-gon of radius [r] about [c], first vertex pointing up.
+  Path _polygon(Offset c, double r, int sides) {
+    final path = Path();
+    for (var i = 0; i < sides; i++) {
+      final a = -pi / 2 + i * 2 * pi / sides;
+      final p = Offset(c.dx + r * cos(a), c.dy + r * sin(a));
+      i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+    }
+    return path..close();
+  }
+
+  @override
+  bool shouldRepaint(_DiceShapePainter oldDelegate) =>
+      oldDelegate.shape != shape;
 }
 
 /// The slim toolbar strip: white icon buttons plus a cyan-ringed badge showing
