@@ -1099,6 +1099,7 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
   late final TextEditingController _nameController;
   late final TextEditingController _commanderController;
   bool _resolving = false;
+  int _commanderSubmitId = 0;
 
   @override
   void initState() {
@@ -1126,6 +1127,7 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
   }
 
   Future<void> _submitCommander(String value) async {
+    final submitId = ++_commanderSubmitId;
     final name = value.trim();
     final notifier = ref.read(gameProvider.notifier);
     if (name.isEmpty) {
@@ -1140,7 +1142,9 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
     }
     setState(() => _resolving = true);
     final art = await ref.read(commanderArtSourceProvider).artUrl(name);
-    if (!mounted) return;
+    // A newer submission may have started (and possibly already finished)
+    // while this lookup was in flight — a stale result must not overwrite it.
+    if (!mounted || submitId != _commanderSubmitId) return;
     setState(() => _resolving = false);
     final existingArt = ref
         .read(gameProvider)
