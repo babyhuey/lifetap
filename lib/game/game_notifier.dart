@@ -30,10 +30,14 @@ class GameNotifier extends Notifier<GameSession> {
     state = GameSession(current: seed.apply(_empty), history: [seed]);
   }
 
-  /// Appends [event] and recomputes the current state.
+  /// Appends [event] and applies it to the current state. [event.apply] is a
+  /// pure function of prior state, so applying just the new event is
+  /// equivalent to re-folding the whole history but O(1) instead of O(n).
   void dispatch(GameEvent event) {
-    final history = [...state.history, event];
-    state = GameSession(current: _fold(history), history: history);
+    state = GameSession(
+      current: event.apply(state.current),
+      history: [...state.history, event],
+    );
   }
 
   /// Toggles the Monarch on [playerId]: clears it if they already hold it,

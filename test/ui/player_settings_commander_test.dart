@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,6 +23,23 @@ class _TogglingArtSource implements CommanderArtSource {
 
   @override
   Future<String?> artUrl(String commanderName) => Future.value(next);
+}
+
+/// Holds each lookup pending until the test explicitly [resolve]s it by name,
+/// so a test can control the order in which overlapping lookups complete.
+class _ControllableArtSource implements CommanderArtSource {
+  final _pending = <String, Completer<String?>>{};
+
+  @override
+  Future<String?> artUrl(String commanderName) {
+    final completer = Completer<String?>();
+    _pending[commanderName] = completer;
+    return completer.future;
+  }
+
+  void resolve(String commanderName, String? url) {
+    _pending[commanderName]!.complete(url);
+  }
 }
 
 void main() {
@@ -153,6 +172,55 @@ void main() {
     // The failure surfaces a SnackBar; let its auto-dismiss timer fire so no
     // timer outlives the test.
     await tester.pumpAndSettle(const Duration(seconds: 5));
+  });
+
+  testWidgets('a stale commander lookup does not overwrite a newer '
+      'submission', (tester) async {
+    final source = _ControllableArtSource();
+    final container = ProviderContainer(
+      overrides: [commanderArtSourceProvider.overrideWithValue(source)],
+    );
+    addTearDown(container.dispose);
+    container.read(settingsProvider.notifier).setInAppKeyboard(false);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: GameScreen()),
+      ),
+    );
+    await tester.pump();
+
+    final id = container.read(gameProvider).current.players.first.id;
+    await tester.tap(find.byKey(ValueKey('cmdr-me-$id')));
+    await tester.pumpAndSettle();
+
+    final commander = find.byKey(const ValueKey('field-commander'));
+
+    // Submit "Aaa"; its lookup is held pending.
+    await tester.enterText(commander, 'Aaa');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+
+    // Before "Aaa" resolves, submit "Bbb"; also held pending.
+    await tester.enterText(commander, 'Bbb');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+
+    // The newer "Bbb" lookup resolves first...
+    source.resolve('Bbb', 'http://art/Bbb');
+    await tester.pump();
+    // ...then the stale "Aaa" lookup resolves after it.
+    source.resolve('Aaa', 'http://art/Aaa');
+    await tester.pumpAndSettle();
+
+    final player = container.read(gameProvider).current.player(id);
+    expect(player.commanderName, 'Bbb');
+    expect(
+      player.artUrl,
+      'http://art/Bbb',
+      reason: 'the stale Aaa lookup must not win',
+    );
   });
 
   testWidgets('player settings open as a compact centered dialog on a side '

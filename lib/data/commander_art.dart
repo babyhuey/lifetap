@@ -26,14 +26,18 @@ class ScryfallArtSource implements CommanderArtSource {
 
   @override
   Future<String?> artUrl(String commanderName) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = '$_cachePrefix${commanderName.trim().toLowerCase()}';
-    final cached = prefs.getString(key);
-    if (cached != null) return cached;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_cachePrefix${commanderName.trim().toLowerCase()}';
+      final cached = prefs.getString(key);
+      if (cached != null) return cached;
 
-    final url = await _fetch(commanderName);
-    if (url != null) await prefs.setString(key, url);
-    return url;
+      final url = await _fetch(commanderName);
+      if (url != null) await prefs.setString(key, url);
+      return url;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String?> _fetch(String commanderName) async {
