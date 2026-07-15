@@ -4,6 +4,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lifetap/game/game_notifier.dart';
 import 'package:lifetap/ui/game_screen.dart';
 import 'package:lifetap/ui/settings_screen.dart';
+import 'package:lifetap/ui/theme.dart';
+
+/// The turn-timer badge's own border color, read off its rendered
+/// [BoxDecoration] — used to prove the badge actually switches to the
+/// warning color at expiry, not just that its text reads "0".
+Color _badgeBorderColor(WidgetTester tester) {
+  final container = tester.widget<Container>(
+    find.descendant(
+      of: find.byKey(const ValueKey('turn-timer-badge')),
+      matching: find.byType(Container),
+    ),
+  );
+  final decoration = container.decoration as BoxDecoration;
+  return decoration.border!.top.color;
+}
 
 void main() {
   testWidgets(
@@ -99,6 +114,38 @@ void main() {
   });
 
   testWidgets(
+    'End Turn cycles through every player and wraps back to player 0',
+    (tester) async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      container.read(settingsProvider.notifier).setTurnTimerEnabled(true);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: GameScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 60));
+
+      // Default 4-player game: player 0 is top-left. End Turn 4 times visits
+      // players 1, 2, 3, then wraps back to player 0 rather than stopping at
+      // the last seat.
+      for (var i = 0; i < 4; i++) {
+        await tester.tap(find.byKey(const ValueKey('end-turn-icon')));
+        await tester.pump();
+      }
+
+      final badgeZoneRect = tester.getRect(
+        find.byKey(const ValueKey('turn-timer-badge')),
+      );
+      expect(badgeZoneRect.center.dx, lessThan(400));
+      expect(badgeZoneRect.center.dy, lessThan(300));
+    },
+  );
+
+  testWidgets(
     'the badge switches to the warning color once the deadline passes, '
     'without blocking normal life taps',
     (tester) async {
@@ -123,6 +170,7 @@ void main() {
       // it never advances on its own between pumps.
       now = const Duration(milliseconds: 60);
       await tester.pump(const Duration(milliseconds: 60));
+      expect(_badgeBorderColor(tester), LifeTapColors.accent);
 
       // Now push `now` well past the deadline and let one more tick observe
       // it and repaint.
@@ -138,6 +186,13 @@ void main() {
           matching: find.text('0'),
         ),
         findsOneWidget,
+      );
+      expect(
+        _badgeBorderColor(tester),
+        LifeTapColors.negative,
+        reason:
+            'the badge must switch to the warning color at expiry, not '
+            'just show "0" in the normal color',
       );
 
       final id = container.read(gameProvider).current.players.first.id;
