@@ -462,6 +462,17 @@ void main() {
       ritual.up(1);
       expect(ritual.progress, 0.0);
     });
+
+    test('progressForZone reflects only that zone, independent of others', () {
+      var now = Duration.zero;
+      final ritual = RitualDetector(zoneCount: 2, clock: () => now);
+
+      ritual.down(1, 0); // only zone 0 held
+      now = const Duration(milliseconds: 750);
+
+      expect(ritual.progressForZone(0), closeTo(750 / 1500, 1e-9));
+      expect(ritual.progressForZone(1), 0.0);
+    });
   });
 
   group('pickWinner', () {
@@ -489,6 +500,19 @@ void main() {
 
     test('throws on empty input', () {
       expect(() => pickWinner(const [], 1), throwsArgumentError);
+    });
+  });
+
+  group('zoneAt', () {
+    test('returns the index of the zone containing the position', () {
+      const zones = [_zone0, _zone1];
+      expect(zoneAt(zones, const Offset(50, 50)), 0);
+      expect(zoneAt(zones, const Offset(50, 150)), 1);
+    });
+
+    test('returns null outside every zone', () {
+      const zones = [_zone0, _zone1];
+      expect(zoneAt(zones, const Offset(500, 500)), isNull);
     });
   });
 }
