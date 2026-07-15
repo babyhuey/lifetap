@@ -49,6 +49,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   bool _gameOverShown = false;
   int? _activeTurnPlayerId;
   Duration? _turnDeadline;
+  int? _lastShownTurnSeconds;
 
   @override
   void initState() {
@@ -237,15 +238,28 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final settings = ref.read(settingsProvider);
     if (!settings.turnTimerEnabled) {
       _activeTurnPlayerId = null;
+      _lastShownTurnSeconds = null;
       return;
     }
     final players = ref.read(gameProvider).current.players;
     if (players.isEmpty) return;
+    // Tracks whether this tick (re)activated turn tracking (setting just
+    // turned on, or a new game reset it) — that always repaints regardless
+    // of the seconds comparison below, since the active player's zone may
+    // have moved even if the displayed countdown happens to read the same.
+    var justActivated = false;
     if (_activeTurnPlayerId == null) {
       _activeTurnPlayerId = players.first.id;
       _turnDeadline =
           _router.clock() + Duration(seconds: settings.turnTimerSeconds);
+      justActivated = true;
     }
+    // The badge only shows whole seconds, so most 60ms ticks don't change
+    // what's on screen — repainting the whole zone Stack 16x/second for a
+    // number that updates once/second is wasted work over a long game.
+    final seconds = _turnSecondsRemaining();
+    if (!justActivated && seconds == _lastShownTurnSeconds) return;
+    _lastShownTurnSeconds = seconds;
     setState(() {});
   }
 
