@@ -2,6 +2,16 @@
 
 All notable changes to LifeTap are documented here.
 
+## [1.1.1] - 2026-07-15
+
+### Fixed
+
+- The turn-timer countdown badge was rebuilding the entire zone layout ~16 times per second continuously for as long as the timer ran; now it only repaints when the displayed number actually changes.
+
+### Added
+
+- Test coverage for the turn timer's wrap-around (End Turn past the last seat back to the first) and its warning-color switch at expiry, the Game Over dialog's "exactly one survivor" gate in a 4-player game, and a partner-commander-only scenario.
+
 ## [1.1.0] - 2026-07-15
 
 ### Added
