@@ -882,22 +882,34 @@ class _PlayerZone extends ConsumerWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (artLayer != null) ...[
-            artLayer,
-            // Scrim so the white life number and name stay legible over art.
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.35),
-                    Colors.black.withValues(alpha: 0.6),
-                  ],
-                ),
+          // Art and its scrim share one seat-rotated frame so the commander
+          // image faces the player (not the bottom of the tablet) and the
+          // scrim's darker end lands at the player's own bottom edge.
+          if (artLayer != null)
+            RotatedBox(
+              key: ValueKey('zone-art-${player.id}'),
+              quarterTurns: quarterTurns,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  artLayer,
+                  // Scrim so the white life number and name stay legible over
+                  // art.
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.35),
+                          Colors.black.withValues(alpha: 0.6),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
           // Knocked out: a dark overlay dims the whole zone (over the art/color
           // background, under the seat-rotated KO mark) so a dead seat reads out.
           if (ko) const ColoredBox(color: Color(0x8C000000)),
