@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -116,6 +117,37 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     // Feed the transient floating "+N / −N" indicator for this seat; it sums
     // consecutive tap/hold changes and fades on its own.
     ref.read(lifeDeltaProvider.notifier).bump(playerId, delta);
+    _playFeedback(playerId);
+  }
+
+  /// Haptic/sound feedback for a life-changing tap on [playerId], read fresh
+  /// from settings each call. Fires whenever the tap's *own* effect lands the
+  /// player in a knocked-out state (not only on the exact alive→dead
+  /// transition — repeatedly tapping an already-KO'd player re-fires this,
+  /// which is an accepted, low-cost simplification for a polish feature).
+  /// Wrapped in try/catch like [_enableWakelock]: the platform channels
+  /// behind [HapticFeedback]/[SystemSound] aren't registered in the test
+  /// environment or on some desktops, and a failure here must never surface.
+  Future<void> _playFeedback(int playerId) async {
+    final settings = ref.read(settingsProvider);
+    final knockedOut = _knockedOut(
+      ref.read(gameProvider).current.player(playerId),
+      settings,
+    );
+    try {
+      if (settings.hapticFeedback) {
+        await (knockedOut
+            ? HapticFeedback.mediumImpact()
+            : HapticFeedback.selectionClick());
+      }
+      if (settings.soundEffects) {
+        await SystemSound.play(
+          knockedOut ? SystemSoundType.alert : SystemSoundType.click,
+        );
+      }
+    } catch (_) {
+      // No-op on platforms/environments without the plugin.
+    }
   }
 
   void _toggleRitual() {
@@ -462,6 +494,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
             reduceLife: reduceLife,
           ),
         );
+    _playFeedback(playerId);
   }
 
   /// The fixed north-up commander-damage minimap for the player at [index]: one
