@@ -74,6 +74,20 @@ void main() {
     _expectRoundTrips(const SetCommander(playerId: 0));
   });
 
+  test('SetPartnerCommander round-trips (both fields set)', () {
+    _expectRoundTrips(
+      const SetPartnerCommander(
+        playerId: 0,
+        commanderName: 'Thrasios, Triton Hero',
+        artUrl: 'http://art/thrasios',
+      ),
+    );
+  });
+
+  test('SetPartnerCommander round-trips (both fields null)', () {
+    _expectRoundTrips(const SetPartnerCommander(playerId: 0));
+  });
+
   test('RecolorPlayer round-trips', () {
     _expectRoundTrips(const RecolorPlayer(playerId: 0, color: 0xFF112233));
   });

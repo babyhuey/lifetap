@@ -206,6 +206,49 @@ void main() {
     });
   });
 
+  group('SetPartnerCommander describe', () {
+    test('a cleared partner reads as cleared, not "→ null"', () {
+      final state = _newGame();
+      final line = const SetPartnerCommander(
+        playerId: 0,
+        commanderName: null,
+      ).describe(state);
+
+      expect(line, isNot(contains('null')));
+      expect(line.toLowerCase(), contains('cleared'));
+    });
+
+    test('setting a partner shows the name', () {
+      final state = _newGame();
+      final line = const SetPartnerCommander(
+        playerId: 0,
+        commanderName: 'Thrasios, Triton Hero',
+      ).describe(state);
+
+      expect(line, contains('Thrasios, Triton Hero'));
+    });
+
+    test('setting a partner does not disturb the primary commander', () {
+      var state = _newGame();
+      state = const SetCommander(
+        playerId: 0,
+        commanderName: 'Atraxa',
+        artUrl: 'http://art/atraxa',
+      ).apply(state);
+      state = const SetPartnerCommander(
+        playerId: 0,
+        commanderName: 'Thrasios, Triton Hero',
+        artUrl: 'http://art/thrasios',
+      ).apply(state);
+
+      final player = state.player(0);
+      expect(player.commanderName, 'Atraxa');
+      expect(player.artUrl, 'http://art/atraxa');
+      expect(player.partnerCommanderName, 'Thrasios, Triton Hero');
+      expect(player.partnerArtUrl, 'http://art/thrasios');
+    });
+  });
+
   group('rename and recolor', () {
     test('RenamePlayer and RecolorPlayer update the target player', () {
       var state = _newGame();

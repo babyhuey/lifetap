@@ -24,6 +24,8 @@ class PlayerState {
     this.counters = const {},
     this.commanderName,
     this.artUrl,
+    this.partnerCommanderName,
+    this.partnerArtUrl,
   });
 
   final int id;
@@ -48,6 +50,14 @@ class PlayerState {
   /// Resolved commander art URL used as the zone background, or null.
   final String? artUrl;
 
+  /// A second commander (Partner/Background), or null if none has been set.
+  /// Recorded name/art only — this app does not track commander damage
+  /// separately per commander, only per opponent (see the design spec).
+  final String? partnerCommanderName;
+
+  /// Resolved art URL for [partnerCommanderName], or null.
+  final String? partnerArtUrl;
+
   int counter(CounterMode mode) => switch (mode) {
     CounterMode.life => life,
     CounterMode.poison => poison,
@@ -71,6 +81,8 @@ class PlayerState {
     Map<String, int>? counters,
     Object? commanderName = _unset,
     Object? artUrl = _unset,
+    Object? partnerCommanderName = _unset,
+    Object? partnerArtUrl = _unset,
   }) {
     return PlayerState(
       id: id,
@@ -86,6 +98,12 @@ class PlayerState {
           ? this.commanderName
           : commanderName as String?,
       artUrl: identical(artUrl, _unset) ? this.artUrl : artUrl as String?,
+      partnerCommanderName: identical(partnerCommanderName, _unset)
+          ? this.partnerCommanderName
+          : partnerCommanderName as String?,
+      partnerArtUrl: identical(partnerArtUrl, _unset)
+          ? this.partnerArtUrl
+          : partnerArtUrl as String?,
     );
   }
 }
