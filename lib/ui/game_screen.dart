@@ -1521,6 +1521,8 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
     }
     setState(() => _resolvingPartner = true);
     final art = await ref.read(commanderArtSourceProvider).artUrl(name);
+    // A newer submission may have started (and possibly already finished)
+    // while this lookup was in flight — a stale result must not overwrite it.
     if (!mounted || submitId != _partnerSubmitId) return;
     setState(() => _resolvingPartner = false);
     final existingArt = ref
@@ -1532,6 +1534,7 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
       SetPartnerCommander(
         playerId: widget.playerId,
         commanderName: name,
+        // Keep existing art when the lookup fails rather than blanking it.
         artUrl: art ?? existingArt,
       ),
     );
@@ -1573,10 +1576,11 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
     // applied), so re-seed the edited read-only field from the authoritative
     // game state rather than the raw input — otherwise a rejected rename would
     // leave the field showing the blank string. Re-sync only the field that was
-    // edited so the two stay independent. The name submit is synchronous, so its
-    // field can always re-sync; the commander submit resolves art asynchronously,
-    // so its field must keep the just-typed name until the dispatch lands (skip
-    // the re-sync while a lookup is still resolving).
+    // edited so all three stay independent. The name submit is synchronous, so
+    // its field can always re-sync; the commander and partner submits each
+    // resolve art asynchronously, so each field must keep its own just-typed
+    // name until its own dispatch lands (skip the re-sync while that field's
+    // lookup is still resolving).
     if (!mounted) return;
     final player = ref.read(gameProvider).current.player(widget.playerId);
     if (identical(controller, _nameController)) {
