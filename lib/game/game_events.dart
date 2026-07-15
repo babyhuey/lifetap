@@ -30,6 +30,10 @@ sealed class GameEvent {
   /// A human-readable, past-tense-ish line describing this event, evaluated
   /// against the state as it was *before* the event ran.
   String describe(GameState before);
+
+  /// A JSON-safe map representation, round-tripped by [eventFromJson]. Used
+  /// to persist the event history across app restarts.
+  Map<String, dynamic> toJson();
 }
 
 /// Starts a fresh game, discarding any prior state.
@@ -58,6 +62,13 @@ class NewGame extends GameEvent {
   @override
   String describe(GameState before) =>
       'New game: $playerCount players at $startingLife life';
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'NewGame',
+    'playerCount': playerCount,
+    'startingLife': startingLife,
+  };
 }
 
 /// Adjusts one of a player's counters. Life is unclamped (it can go negative);
@@ -93,6 +104,14 @@ class AdjustCounter extends GameEvent {
     final sign = delta >= 0 ? '+' : '';
     return '${p.name} ${mode.name} $sign$delta';
   }
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'AdjustCounter',
+    'playerId': playerId,
+    'mode': mode.name,
+    'delta': delta,
+  };
 }
 
 /// Adjusts one of a player's generic named counters (Treasure, Storm, Rad, …),
@@ -125,6 +144,14 @@ class AdjustNamedCounter extends GameEvent {
     final sign = delta >= 0 ? '+' : '';
     return '${p.name} $name $sign$delta';
   }
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'AdjustNamedCounter',
+    'playerId': playerId,
+    'name': name,
+    'delta': delta,
+  };
 }
 
 /// Records commander damage dealt to [playerId] by [fromPlayerId]'s commander.
@@ -165,6 +192,15 @@ class AdjustCommanderDamage extends GameEvent {
     final sign = delta >= 0 ? '+' : '';
     return '${source.name} cmdr dmg to ${target.name} $sign$delta';
   }
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'AdjustCommanderDamage',
+    'playerId': playerId,
+    'fromPlayerId': fromPlayerId,
+    'delta': delta,
+    'reduceLife': reduceLife,
+  };
 }
 
 /// Renames a player.
@@ -181,6 +217,13 @@ class RenamePlayer extends GameEvent {
   @override
   String describe(GameState before) =>
       '${before.player(playerId).name} renamed to $name';
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'RenamePlayer',
+    'playerId': playerId,
+    'name': name,
+  };
 }
 
 /// Sets a player's commander name and resolved art URL (either may be null to
@@ -207,6 +250,14 @@ class SetCommander extends GameEvent {
         ? '$name commander cleared'
         : '$name commander → $commanderName';
   }
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'SetCommander',
+    'playerId': playerId,
+    'commanderName': commanderName,
+    'artUrl': artUrl,
+  };
 }
 
 /// Recolors a player.
@@ -223,6 +274,13 @@ class RecolorPlayer extends GameEvent {
   @override
   String describe(GameState before) =>
       '${before.player(playerId).name} recolored';
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'RecolorPlayer',
+    'playerId': playerId,
+    'color': color,
+  };
 }
 
 /// Sets the single-holder Monarch to [playerId], or clears it when null.
@@ -240,6 +298,9 @@ class SetMonarch extends GameEvent {
   String describe(GameState before) => playerId == null
       ? 'Monarch cleared'
       : '${before.player(playerId!).name} became monarch';
+
+  @override
+  Map<String, dynamic> toJson() => {'type': 'SetMonarch', 'playerId': playerId};
 }
 
 /// Sets the single-holder Initiative to [playerId], or clears it when null.
@@ -256,6 +317,12 @@ class SetInitiative extends GameEvent {
   String describe(GameState before) => playerId == null
       ? 'Initiative cleared'
       : '${before.player(playerId!).name} took the initiative';
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'SetInitiative',
+    'playerId': playerId,
+  };
 }
 
 /// Advances the table-wide day/night state one step: none → day → night → none.
@@ -269,6 +336,9 @@ class CycleDayNight extends GameEvent {
   @override
   String describe(GameState before) =>
       'Day/Night: ${_nextDayNight(before.dayNight).name}';
+
+  @override
+  Map<String, dynamic> toJson() => const {'type': 'CycleDayNight'};
 }
 
 /// The next state in the day/night cycle.
@@ -277,3 +347,49 @@ DayNight _nextDayNight(DayNight current) => switch (current) {
   DayNight.day => DayNight.night,
   DayNight.night => DayNight.none,
 };
+
+/// Reconstructs a [GameEvent] from the map produced by [GameEvent.toJson].
+/// Throws [FormatException] on an unrecognized `'type'` tag — the caller
+/// (the persistence layer) treats any such failure as "nothing to restore".
+GameEvent eventFromJson(Map<String, dynamic> json) {
+  final type = json['type'] as String;
+  return switch (type) {
+    'NewGame' => NewGame(
+      playerCount: json['playerCount'] as int,
+      startingLife: json['startingLife'] as int,
+    ),
+    'AdjustCounter' => AdjustCounter(
+      playerId: json['playerId'] as int,
+      mode: CounterMode.values.byName(json['mode'] as String),
+      delta: json['delta'] as int,
+    ),
+    'AdjustNamedCounter' => AdjustNamedCounter(
+      playerId: json['playerId'] as int,
+      name: json['name'] as String,
+      delta: json['delta'] as int,
+    ),
+    'AdjustCommanderDamage' => AdjustCommanderDamage(
+      playerId: json['playerId'] as int,
+      fromPlayerId: json['fromPlayerId'] as int,
+      delta: json['delta'] as int,
+      reduceLife: json['reduceLife'] as bool,
+    ),
+    'RenamePlayer' => RenamePlayer(
+      playerId: json['playerId'] as int,
+      name: json['name'] as String,
+    ),
+    'SetCommander' => SetCommander(
+      playerId: json['playerId'] as int,
+      commanderName: json['commanderName'] as String?,
+      artUrl: json['artUrl'] as String?,
+    ),
+    'RecolorPlayer' => RecolorPlayer(
+      playerId: json['playerId'] as int,
+      color: json['color'] as int,
+    ),
+    'SetMonarch' => SetMonarch(playerId: json['playerId'] as int?),
+    'SetInitiative' => SetInitiative(playerId: json['playerId'] as int?),
+    'CycleDayNight' => const CycleDayNight(),
+    _ => throw FormatException('Unknown GameEvent type: $type'),
+  };
+}
