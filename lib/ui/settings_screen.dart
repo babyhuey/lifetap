@@ -19,6 +19,8 @@ class GameSettings {
     this.commanderDamageLifeLoss = true,
     this.autoKo = true,
     this.inAppKeyboard = true,
+    this.hapticFeedback = true,
+    this.soundEffects = false,
   });
 
   /// When true, commander damage also subtracts life (the default rule).
@@ -31,15 +33,26 @@ class GameSettings {
   /// instead of the OS keyboard (which the OS can't rotate to face a side seat).
   final bool inAppKeyboard;
 
+  /// When true, a life-adjust or commander-damage tap gives light haptic
+  /// feedback (stronger for a knocked-out player).
+  final bool hapticFeedback;
+
+  /// When true, the same taps also play a short system click/alert sound.
+  final bool soundEffects;
+
   GameSettings copyWith({
     bool? commanderDamageLifeLoss,
     bool? autoKo,
     bool? inAppKeyboard,
+    bool? hapticFeedback,
+    bool? soundEffects,
   }) => GameSettings(
     commanderDamageLifeLoss:
         commanderDamageLifeLoss ?? this.commanderDamageLifeLoss,
     autoKo: autoKo ?? this.autoKo,
     inAppKeyboard: inAppKeyboard ?? this.inAppKeyboard,
+    hapticFeedback: hapticFeedback ?? this.hapticFeedback,
+    soundEffects: soundEffects ?? this.soundEffects,
   );
 }
 
@@ -54,6 +67,12 @@ class SettingsNotifier extends Notifier<GameSettings> {
 
   void setInAppKeyboard(bool value) =>
       state = state.copyWith(inAppKeyboard: value);
+
+  void setHapticFeedback(bool value) =>
+      state = state.copyWith(hapticFeedback: value);
+
+  void setSoundEffects(bool value) =>
+      state = state.copyWith(soundEffects: value);
 }
 
 final settingsProvider = NotifierProvider<SettingsNotifier, GameSettings>(
@@ -215,6 +234,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               label: 'Auto-KO',
               value: settings.autoKo,
               onChanged: ref.read(settingsProvider.notifier).setAutoKo,
+            ),
+            _ToggleRow(
+              label: 'Haptic feedback',
+              value: settings.hapticFeedback,
+              onChanged: ref.read(settingsProvider.notifier).setHapticFeedback,
+            ),
+            _ToggleRow(
+              label: 'Sound effects',
+              value: settings.soundEffects,
+              onChanged: ref.read(settingsProvider.notifier).setSoundEffects,
             ),
             const SizedBox(height: 32),
             const _SectionHeader('Offline'),
