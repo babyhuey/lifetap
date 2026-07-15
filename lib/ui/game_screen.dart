@@ -70,25 +70,28 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     ref.listenManual(gameProvider, (previous, next) {
       ref.read(gamePersistenceProvider).save(next.history);
     });
-    // A single centered summary once exactly one player remains un-KO'd,
-    // shown once per game. Reads current state fresh each time rather than
-    // diffing previous/next, so it naturally never fires while Auto-KO is
-    // off (nobody is ever treated as eliminated, matching that setting's
-    // meaning everywhere else in the app).
+    // A single centered summary once exactly one player remains un-KO'd.
+    // State-derived rather than a one-shot-per-game latch: `_gameOverShown`
+    // re-arms whenever the current alive count isn't exactly 1, which covers
+    // both an ongoing game and a fresh new game (both have 2+ alive players)
+    // — so an Undo that revives the game after a dialog was shown correctly
+    // allows a later, genuinely new game-over to show again. Reads current
+    // state fresh each time rather than diffing previous/next, so it
+    // naturally never fires while Auto-KO is off (nobody is ever treated as
+    // eliminated, matching that setting's meaning everywhere else in the
+    // app).
     ref.listenManual(gameProvider, (previous, next) {
-      if (next.history.length <= 1) {
-        _gameOverShown = false;
-        return;
-      }
-      if (_gameOverShown) return;
       final settings = ref.read(settingsProvider);
       final alive = next.current.players
           .where((p) => !_knockedOut(p, settings))
           .toList();
-      if (alive.length == 1) {
-        _gameOverShown = true;
-        _showGameOverSummary(next.current, alive.single.id);
+      if (alive.length != 1) {
+        _gameOverShown = false;
+        return;
       }
+      if (_gameOverShown) return;
+      _gameOverShown = true;
+      _showGameOverSummary(next.current, alive.single.id);
     });
   }
 
@@ -96,6 +99,17 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final history = await ref.read(gamePersistenceProvider).load();
     if (history == null || !mounted) return;
     try {
+      // Folded here (mirroring GameNotifier's internal fold) BEFORE calling
+      // restoreFrom, so the game-over latch is pre-set from the
+      // about-to-be-restored state ahead of restoreFrom's listeners firing.
+      // ref.listenManual notifies synchronously as soon as `state =` runs
+      // inside restoreFrom, so setting `_gameOverShown` only after that call
+      // returns would be too late: an already-finished restored game's
+      // one-survivor state would already have popped the dialog by then.
+      final restored = _foldHistory(history);
+      final settings = ref.read(settingsProvider);
+      final alive = restored.players.where((p) => !_knockedOut(p, settings));
+      _gameOverShown = alive.length == 1;
       ref.read(gameProvider.notifier).restoreFrom(history);
     } catch (_) {
       // An unfoldable history (e.g. schema drift, external tampering) — keep
@@ -692,6 +706,19 @@ const double _cmdrCellGap = 4;
 /// damage KOs regardless of the "life loss" toggle, matching [PlayerState.isDead].
 bool _knockedOut(PlayerState player, GameSettings settings) {
   return settings.autoKo && player.isDead;
+}
+
+/// Folds [history] into the [GameState] it produces, mirroring
+/// [GameNotifier]'s own private fold. Used by [_GameScreenState._restoreIfAvailable]
+/// to read the about-to-be-restored state ahead of calling
+/// [GameNotifier.restoreFrom], whose listeners fire synchronously with the new
+/// state already applied — so this must run first.
+GameState _foldHistory(List<GameEvent> history) {
+  var state = const GameState(players: [], startingLife: 20);
+  for (final event in history) {
+    state = event.apply(state);
+  }
+  return state;
 }
 
 /// Luminance-weighted saturation matrix that maps every color to its grey
