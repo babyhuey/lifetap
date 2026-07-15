@@ -349,8 +349,10 @@ DayNight _nextDayNight(DayNight current) => switch (current) {
 };
 
 /// Reconstructs a [GameEvent] from the map produced by [GameEvent.toJson].
-/// Throws [FormatException] on an unrecognized `'type'` tag — the caller
-/// (the persistence layer) treats any such failure as "nothing to restore".
+/// Throws on any malformed input — an unrecognized `'type'` tag
+/// ([FormatException]), a missing or wrong-typed field ([TypeError]), or an
+/// invalid enum value ([ArgumentError]) — which the persistence layer's
+/// broad `catch (_)` treats uniformly as "nothing to restore".
 GameEvent eventFromJson(Map<String, dynamic> json) {
   final type = json['type'] as String;
   return switch (type) {
