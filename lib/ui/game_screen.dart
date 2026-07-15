@@ -121,7 +121,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     if (!_ritualActive || _ritualWinnerPlayerId != null) return;
     if (_ritualDetector!.poll()) {
       _completeRitual();
-    } else {
+    } else if (_ritualDetector!.progress > 0) {
       setState(() {});
     }
   }
@@ -316,7 +316,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       child: _PlayerNameLabel(
                         name: players[i].name,
                         color: Color(players[i].color),
-                        onTap: () => _editName(players[i].id, turns[i]),
+                        onTap: _ritualActive
+                            ? null
+                            : () => _editName(players[i].id, turns[i]),
                       ),
                     ),
                   ),
@@ -351,13 +353,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 child: _Toolbar(
                   playerCount: players.length,
                   dayNight: game.dayNight,
-                  onDayNight: () =>
-                      ref.read(gameProvider.notifier).cycleDayNight(),
-                  onSettings: _openSettings,
-                  onUndo: () => ref.read(gameProvider.notifier).undo(),
-                  onDice: _showDice,
-                  onCoin: _showCoin,
-                  onHistory: _showHistory,
+                  onDayNight: _ritualActive
+                      ? null
+                      : () => ref.read(gameProvider.notifier).cycleDayNight(),
+                  onSettings: _ritualActive ? null : _openSettings,
+                  onUndo: _ritualActive
+                      ? null
+                      : () => ref.read(gameProvider.notifier).undo(),
+                  onDice: _ritualActive ? null : _showDice,
+                  onCoin: _ritualActive ? null : _showCoin,
+                  onHistory: _ritualActive ? null : _showHistory,
                   onRitual: _toggleRitual,
                 ),
               ),
@@ -468,7 +473,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 color: Color(me.color),
                 artUrl: me.artUrl,
                 label: 'me',
-                onTap: () => _showPlayerSettings(me.id, turns[index]),
+                onTap: _ritualActive
+                    ? null
+                    : () => _showPlayerSettings(me.id, turns[index]),
                 onDecrement: null,
               )
             else
@@ -479,8 +486,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 color: Color(players[j].color),
                 artUrl: players[j].artUrl,
                 value: me.commanderDamage[players[j].id] ?? 0,
-                onTap: () => _adjustCommanderDamage(me.id, players[j].id, 1),
-                onDecrement: (me.commanderDamage[players[j].id] ?? 0) > 0
+                onTap: _ritualActive
+                    ? null
+                    : () => _adjustCommanderDamage(me.id, players[j].id, 1),
+                onDecrement:
+                    !_ritualActive &&
+                        (me.commanderDamage[players[j].id] ?? 0) > 0
                     ? () => _adjustCommanderDamage(me.id, players[j].id, -1)
                     : null,
               ),
@@ -998,7 +1009,7 @@ class _CommanderDamageSquare extends StatelessWidget {
   final String? artUrl;
   final int? value;
   final String? label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final VoidCallback? onDecrement;
 
   @override
@@ -1101,7 +1112,7 @@ class _PlayerNameLabel extends StatelessWidget {
 
   final String name;
   final Color color;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -2241,12 +2252,12 @@ class _Toolbar extends StatelessWidget {
 
   final int playerCount;
   final DayNight dayNight;
-  final VoidCallback onDayNight;
-  final VoidCallback onSettings;
-  final VoidCallback onUndo;
-  final VoidCallback onDice;
-  final VoidCallback onCoin;
-  final VoidCallback onHistory;
+  final VoidCallback? onDayNight;
+  final VoidCallback? onSettings;
+  final VoidCallback? onUndo;
+  final VoidCallback? onDice;
+  final VoidCallback? onCoin;
+  final VoidCallback? onHistory;
   final VoidCallback onRitual;
 
   @override
@@ -2322,7 +2333,7 @@ class _PlayerCountBadge extends StatelessWidget {
   const _PlayerCountBadge({required this.count, required this.onTap});
 
   final int count;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
