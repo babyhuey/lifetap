@@ -23,7 +23,12 @@ import 'theme.dart';
 const double _toolbarHeight = 64.0;
 
 class GameScreen extends ConsumerStatefulWidget {
-  const GameScreen({super.key});
+  const GameScreen({super.key, this.clock});
+
+  /// Overrides the pointer router's and ritual detector's time source.
+  /// Defaults to real time; tests inject a controllable clock so a 1.5s hold
+  /// can be simulated without waiting on the wall clock.
+  final Duration Function()? clock;
 
   @override
   ConsumerState<GameScreen> createState() => _GameScreenState();
@@ -34,24 +39,30 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   final Map<int, Duration> _downAt = {};
   final Random _rng = Random();
   Timer? _holdTimer;
+  bool _ritualActive = false;
+  RitualDetector? _ritualDetector;
+  int? _ritualWinnerPlayerId;
+  final Map<int, int> _ritualPointerZones = {};
+  Timer? _ritualDismissTimer;
 
   @override
   void initState() {
     super.initState();
-    _router = PointerRouter(onResult: _onResult);
+    _router = PointerRouter(onResult: _onResult, clock: widget.clock);
     // Drives hold auto-repeat: while a finger is held stationary in a zone the
     // router emits accelerating repeats on each tick. A no-op when nothing is
     // held, so the fixed interval costs almost nothing at rest.
-    _holdTimer = Timer.periodic(
-      const Duration(milliseconds: 60),
-      (_) => _router.tick(),
-    );
+    _holdTimer = Timer.periodic(const Duration(milliseconds: 60), (_) {
+      _router.tick();
+      _ritualTick();
+    });
     _enableWakelock();
   }
 
   @override
   void dispose() {
     _holdTimer?.cancel();
+    _ritualDismissTimer?.cancel();
     super.dispose();
   }
 
@@ -85,21 +96,100 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     ref.read(lifeDeltaProvider.notifier).bump(playerId, delta);
   }
 
+  void _toggleRitual() {
+    if (_ritualActive) {
+      _closeRitual();
+    } else {
+      _openRitual();
+    }
+  }
+
+  void _openRitual() {
+    final playerCount = ref.read(gameProvider).current.players.length;
+    setState(() {
+      _ritualDetector = RitualDetector(
+        zoneCount: playerCount,
+        clock: _router.clock,
+      );
+      _ritualActive = true;
+      _ritualWinnerPlayerId = null;
+      _ritualPointerZones.clear();
+    });
+  }
+
+  void _ritualTick() {
+    if (!_ritualActive || _ritualWinnerPlayerId != null) return;
+    if (_ritualDetector!.poll()) {
+      _completeRitual();
+    } else {
+      setState(() {});
+    }
+  }
+
+  void _completeRitual() {
+    final pointerIds = _ritualPointerZones.keys.toList();
+    final winnerPointer = pickWinner(pointerIds, Random().nextInt(1 << 32));
+    final winnerZone = _ritualPointerZones[winnerPointer]!;
+    final winnerPlayerId = ref
+        .read(gameProvider)
+        .current
+        .players[winnerZone]
+        .id;
+    setState(() => _ritualWinnerPlayerId = winnerPlayerId);
+    _ritualDismissTimer = Timer(
+      const Duration(milliseconds: 2500),
+      _closeRitual,
+    );
+  }
+
+  void _closeRitual() {
+    _ritualDismissTimer?.cancel();
+    _ritualDismissTimer = null;
+    setState(() {
+      _ritualActive = false;
+      _ritualDetector = null;
+      _ritualWinnerPlayerId = null;
+      _ritualPointerZones.clear();
+    });
+  }
+
   void _onPointerDown(PointerDownEvent e) {
+    if (_ritualActive) {
+      final zone = zoneAt(_router.zones, e.localPosition);
+      if (zone != null) {
+        _ritualDetector!.down(e.pointer, zone);
+        _ritualPointerZones[e.pointer] = zone;
+        setState(() {});
+      }
+      return;
+    }
     _downAt[e.pointer] = e.timeStamp;
     _router.down(e.pointer, e.localPosition);
   }
 
   void _onPointerMove(PointerMoveEvent e) {
+    if (_ritualActive) return;
     _router.move(e.pointer, e.localPosition);
   }
 
   void _onPointerUp(PointerUpEvent e) {
+    if (_ritualActive) {
+      _ritualDetector?.up(e.pointer);
+      _ritualPointerZones.remove(e.pointer);
+      setState(() {});
+      return;
+    }
     final downAt = _downAt.remove(e.pointer) ?? e.timeStamp;
     _router.up(e.pointer, heldFor: e.timeStamp - downAt);
   }
 
   void _onPointerCancel(PointerCancelEvent e) {
+    if (_ritualActive) {
+      _ritualDetector?.up(e.pointer);
+      _ritualPointerZones.remove(e.pointer);
+      setState(() {});
+      return;
+    }
     _downAt.remove(e.pointer);
     _router.cancel(e.pointer);
   }
@@ -264,8 +354,18 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                   onDice: _showDice,
                   onCoin: _showCoin,
                   onHistory: _showHistory,
+                  onRitual: _toggleRitual,
                 ),
               ),
+              if (_ritualActive)
+                _RitualOverlay(
+                  players: players,
+                  rects: rects,
+                  turns: turns,
+                  detector: _ritualDetector!,
+                  winnerPlayerId: _ritualWinnerPlayerId,
+                  onClose: _closeRitual,
+                ),
             ],
           );
         },
@@ -2132,6 +2232,7 @@ class _Toolbar extends StatelessWidget {
     required this.onDice,
     required this.onCoin,
     required this.onHistory,
+    required this.onRitual,
   });
 
   final int playerCount;
@@ -2142,6 +2243,7 @@ class _Toolbar extends StatelessWidget {
   final VoidCallback onDice;
   final VoidCallback onCoin;
   final VoidCallback onHistory;
+  final VoidCallback onRitual;
 
   @override
   Widget build(BuildContext context) {
@@ -2198,6 +2300,13 @@ class _Toolbar extends StatelessWidget {
             color: Colors.white,
             onPressed: onHistory,
             icon: const Icon(Icons.history),
+          ),
+          IconButton(
+            key: const ValueKey('ritual-icon'),
+            tooltip: 'Pick starting player',
+            color: Colors.white,
+            onPressed: onRitual,
+            icon: const Icon(Icons.shuffle),
           ),
         ],
       ),
@@ -2915,6 +3024,124 @@ class _CountersPopupState extends ConsumerState<_CountersPopup> {
           style: TextStyle(color: _PopupColors.textSecondary, fontSize: 13),
         ),
       ],
+    );
+  }
+}
+
+class _RitualOverlay extends StatelessWidget {
+  const _RitualOverlay({
+    required this.players,
+    required this.rects,
+    required this.turns,
+    required this.detector,
+    required this.winnerPlayerId,
+    required this.onClose,
+  });
+
+  final List<PlayerState> players;
+  final List<Rect> rects;
+  final List<int> turns;
+  final RitualDetector detector;
+  final int? winnerPlayerId;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      key: const ValueKey('ritual-overlay'),
+      children: [
+        const Positioned.fill(
+          child: IgnorePointer(child: ColoredBox(color: Color(0xCC000000))),
+        ),
+        for (var i = 0; i < players.length; i++)
+          Positioned.fromRect(
+            rect: rects[i],
+            child: IgnorePointer(
+              child: RotatedBox(
+                quarterTurns: turns[i],
+                child: Center(
+                  child: winnerPlayerId == null
+                      ? _RitualProgressPanel(
+                          progress: detector.progressForZone(i),
+                        )
+                      : winnerPlayerId == players[i].id
+                      ? const _RitualWinnerBanner()
+                      : const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ),
+        Positioned(
+          top: 8,
+          right: 8,
+          child: IconButton(
+            key: const ValueKey('ritual-close'),
+            tooltip: 'Cancel',
+            color: Colors.white,
+            icon: const Icon(Icons.close),
+            onPressed: onClose,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RitualProgressPanel extends StatelessWidget {
+  const _RitualProgressPanel({required this.progress});
+
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 72,
+          height: 72,
+          child: CircularProgressIndicator(
+            value: progress,
+            strokeWidth: 6,
+            color: LifeTapColors.accent,
+            backgroundColor: LifeTapColors.chipUnselected,
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Hold',
+          style: TextStyle(
+            color: LifeTapColors.textPrimary,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RitualWinnerBanner extends StatelessWidget {
+  const _RitualWinnerBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('ritual-winner-banner'),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        color: LifeTapColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: LifeTapColors.accent, width: 2),
+      ),
+      child: const Text(
+        'You go first!',
+        style: TextStyle(
+          color: LifeTapColors.textPrimary,
+          fontWeight: FontWeight.w800,
+          fontSize: 20,
+        ),
+      ),
     );
   }
 }
