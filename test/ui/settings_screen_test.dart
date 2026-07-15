@@ -49,8 +49,16 @@ void main() {
     );
     await tester.pump();
 
-    // Auto-KO is the last toggle row.
-    await tester.tap(find.byType(Switch).last);
+    // Locate Auto-KO's own Switch by its row rather than position — a
+    // positional .last would silently start targeting the wrong toggle if a
+    // later toggle is added after it (ListView virtualization can also hide
+    // off-screen toggles from a naive .last in the test viewport).
+    final autoKoRow = find
+        .ancestor(of: find.text('Auto-KO'), matching: find.byType(Row))
+        .first;
+    await tester.tap(
+      find.descendant(of: autoKoRow, matching: find.byType(Switch)),
+    );
     await tester.pump();
 
     expect(container.read(settingsProvider).autoKo, isFalse);
