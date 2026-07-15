@@ -260,6 +260,44 @@ class SetCommander extends GameEvent {
   };
 }
 
+/// Sets a player's second commander (Partner/Background) name and resolved
+/// art URL (either may be null to clear it) — recorded alongside, and
+/// entirely independent of, the primary commander set by [SetCommander].
+class SetPartnerCommander extends GameEvent {
+  const SetPartnerCommander({
+    required this.playerId,
+    this.commanderName,
+    this.artUrl,
+  });
+
+  final int playerId;
+  final String? commanderName;
+  final String? artUrl;
+
+  @override
+  GameState apply(GameState state) => state.replacePlayer(
+    state
+        .player(playerId)
+        .copyWith(partnerCommanderName: commanderName, partnerArtUrl: artUrl),
+  );
+
+  @override
+  String describe(GameState before) {
+    final name = before.player(playerId).name;
+    return commanderName == null
+        ? '$name partner cleared'
+        : '$name partner → $commanderName';
+  }
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'SetPartnerCommander',
+    'playerId': playerId,
+    'commanderName': commanderName,
+    'artUrl': artUrl,
+  };
+}
+
 /// Recolors a player.
 class RecolorPlayer extends GameEvent {
   const RecolorPlayer({required this.playerId, required this.color});
@@ -381,6 +419,11 @@ GameEvent eventFromJson(Map<String, dynamic> json) {
       name: json['name'] as String,
     ),
     'SetCommander' => SetCommander(
+      playerId: json['playerId'] as int,
+      commanderName: json['commanderName'] as String?,
+      artUrl: json['artUrl'] as String?,
+    ),
+    'SetPartnerCommander' => SetPartnerCommander(
       playerId: json['playerId'] as int,
       commanderName: json['commanderName'] as String?,
       artUrl: json['artUrl'] as String?,
