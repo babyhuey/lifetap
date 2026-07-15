@@ -246,12 +246,14 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                   child: Align(
                     alignment: Alignment.topRight,
                     child: IconButton(
+                      key: ValueKey('settings-${players[i].id}'),
                       tooltip: 'Player settings',
                       color: Colors.white70,
                       iconSize: 20,
                       icon: const Icon(Icons.settings),
-                      onPressed: () =>
-                          _showPlayerSettings(players[i].id, turns[i]),
+                      onPressed: _ritualActive
+                          ? null
+                          : () => _showPlayerSettings(players[i].id, turns[i]),
                     ),
                   ),
                 ),
@@ -272,7 +274,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       color: Colors.white70,
                       iconSize: 20,
                       icon: const Icon(Icons.grid_view),
-                      onPressed: () => _showCounters(players[i].id, turns[i]),
+                      onPressed: _ritualActive
+                          ? null
+                          : () => _showCounters(players[i].id, turns[i]),
                     ),
                   ),
                 ),
