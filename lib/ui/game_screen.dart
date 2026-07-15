@@ -46,6 +46,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   int? _ritualWinnerPlayerId;
   final Map<int, int> _ritualPointerZones = {};
   Timer? _ritualDismissTimer;
+  bool _gameOverShown = false;
 
   @override
   void initState() {
@@ -68,6 +69,26 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     // same default game, which is unobservable.
     ref.listenManual(gameProvider, (previous, next) {
       ref.read(gamePersistenceProvider).save(next.history);
+    });
+    // A single centered summary once exactly one player remains un-KO'd,
+    // shown once per game. Reads current state fresh each time rather than
+    // diffing previous/next, so it naturally never fires while Auto-KO is
+    // off (nobody is ever treated as eliminated, matching that setting's
+    // meaning everywhere else in the app).
+    ref.listenManual(gameProvider, (previous, next) {
+      if (next.history.length <= 1) {
+        _gameOverShown = false;
+        return;
+      }
+      if (_gameOverShown) return;
+      final settings = ref.read(settingsProvider);
+      final alive = next.current.players
+          .where((p) => !_knockedOut(p, settings))
+          .toList();
+      if (alive.length == 1) {
+        _gameOverShown = true;
+        _showGameOverSummary(next.current, alive.single.id);
+      }
     });
   }
 
@@ -476,6 +497,13 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       context: context,
       builder: (context) =>
           _PlayerSettingsSheet(playerId: playerId, quarterTurns: quarterTurns),
+    );
+  }
+
+  Future<void> _showGameOverSummary(GameState state, int winnerId) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _GameOverDialog(state: state, winnerId: winnerId),
     );
   }
 
@@ -1984,6 +2012,55 @@ class _RollDialog extends StatelessWidget {
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('OK'),
+        ),
+      ],
+    );
+  }
+}
+
+/// A plain centered summary shown once when exactly one player remains
+/// un-knocked-out: the winner, then every player's final life total.
+/// Table-wide, not seat-rotated — matches [_RollDialog]/[_DicePopup], not the
+/// per-player dialogs.
+class _GameOverDialog extends StatelessWidget {
+  const _GameOverDialog({required this.state, required this.winnerId});
+
+  final GameState state;
+  final int winnerId;
+
+  @override
+  Widget build(BuildContext context) {
+    final winner = state.player(winnerId);
+    return AlertDialog(
+      backgroundColor: LifeTapColors.surface,
+      title: const Text('Game Over'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${winner.name} wins!',
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: LifeTapColors.accent,
+            ),
+          ),
+          const SizedBox(height: 12),
+          for (final p in state.players)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Text(
+                '${p.name}: ${p.life} life${p.id == winnerId ? '' : ' (KO)'}',
+                style: const TextStyle(color: LifeTapColors.textPrimary),
+              ),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
         ),
       ],
     );
