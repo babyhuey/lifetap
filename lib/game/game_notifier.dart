@@ -30,6 +30,14 @@ class GameNotifier extends Notifier<GameSession> {
     state = GameSession(current: seed.apply(_empty), history: [seed]);
   }
 
+  /// Replaces all state with [history], folded exactly like any other
+  /// history — used to resume a session persisted before the app was last
+  /// closed. Pure state-setting; the caller (the UI layer) is responsible
+  /// for loading [history] from persistence.
+  void restoreFrom(List<GameEvent> history) {
+    state = GameSession(current: _fold(history), history: history);
+  }
+
   /// Appends [event] and applies it to the current state. [event.apply] is a
   /// pure function of prior state, so applying just the new event is
   /// equivalent to re-folding the whole history but O(1) instead of O(n).

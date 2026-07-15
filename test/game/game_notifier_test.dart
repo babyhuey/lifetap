@@ -30,6 +30,22 @@ void main() {
     expect(session().current.player(0).life, 37);
   });
 
+  test('restoreFrom folds the given history into current and stores it '
+      'as-is', () {
+    final history = <GameEvent>[
+      const NewGame(playerCount: 3, startingLife: 30),
+      const AdjustCounter(playerId: 0, mode: CounterMode.life, delta: -7),
+      const RenamePlayer(playerId: 1, name: 'Restored'),
+    ];
+
+    notifier().restoreFrom(history);
+
+    expect(session().history, history);
+    expect(session().current.playerCount, 3);
+    expect(session().current.player(0).life, 23);
+    expect(session().current.player(1).name, 'Restored');
+  });
+
   test('undo reverses a commander-damage-with-life event exactly', () {
     notifier().newGame(2, 40);
     final before = session().current.player(0);

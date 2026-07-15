@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../data/commander_art.dart';
+import '../data/game_persistence.dart';
 import '../game/game_events.dart';
 import '../game/game_state.dart';
 import '../game/game_notifier.dart';
@@ -57,6 +58,22 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       _ritualTick();
     });
     _enableWakelock();
+    _restoreIfAvailable();
+    // Persists every subsequent state change (including a fresh NewGame from
+    // Settings, which naturally overwrites whatever was saved before). Does
+    // not fire for the state current at registration, so the very first
+    // default-seeded game before any move is only persisted once the player
+    // acts — if the app is killed before that, relaunching just reseeds the
+    // same default game, which is unobservable.
+    ref.listenManual(gameProvider, (previous, next) {
+      ref.read(gamePersistenceProvider).save(next.history);
+    });
+  }
+
+  Future<void> _restoreIfAvailable() async {
+    final history = await ref.read(gamePersistenceProvider).load();
+    if (history == null || !mounted) return;
+    ref.read(gameProvider.notifier).restoreFrom(history);
   }
 
   @override
