@@ -1416,8 +1416,11 @@ class _PlayerSettingsSheet extends ConsumerStatefulWidget {
 class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
   late final TextEditingController _nameController;
   late final TextEditingController _commanderController;
+  late final TextEditingController _partnerController;
   bool _resolving = false;
+  bool _resolvingPartner = false;
   int _commanderSubmitId = 0;
+  int _partnerSubmitId = 0;
 
   @override
   void initState() {
@@ -1427,12 +1430,16 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
     _commanderController = TextEditingController(
       text: player.commanderName ?? '',
     );
+    _partnerController = TextEditingController(
+      text: player.partnerCommanderName ?? '',
+    );
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _commanderController.dispose();
+    _partnerController.dispose();
     super.dispose();
   }
 
@@ -1484,6 +1491,43 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
     }
   }
 
+  Future<void> _submitPartnerCommander(String value) async {
+    final submitId = ++_partnerSubmitId;
+    final name = value.trim();
+    final notifier = ref.read(gameProvider.notifier);
+    if (name.isEmpty) {
+      notifier.dispatch(
+        SetPartnerCommander(
+          playerId: widget.playerId,
+          commanderName: null,
+          artUrl: null,
+        ),
+      );
+      return;
+    }
+    setState(() => _resolvingPartner = true);
+    final art = await ref.read(commanderArtSourceProvider).artUrl(name);
+    if (!mounted || submitId != _partnerSubmitId) return;
+    setState(() => _resolvingPartner = false);
+    final existingArt = ref
+        .read(gameProvider)
+        .current
+        .player(widget.playerId)
+        .partnerArtUrl;
+    notifier.dispatch(
+      SetPartnerCommander(
+        playerId: widget.playerId,
+        commanderName: name,
+        artUrl: art ?? existingArt,
+      ),
+    );
+    if (art == null && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Couldn\'t find art for "$name"')));
+    }
+  }
+
   void _recolor(int color) {
     ref
         .read(gameProvider.notifier)
@@ -1525,6 +1569,11 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
       setState(() => _nameController.text = player.name);
     } else if (identical(controller, _commanderController) && !_resolving) {
       setState(() => _commanderController.text = player.commanderName ?? '');
+    } else if (identical(controller, _partnerController) &&
+        !_resolvingPartner) {
+      setState(
+        () => _partnerController.text = player.partnerCommanderName ?? '',
+      );
     }
   }
 
@@ -1534,6 +1583,16 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
     // big seat-rotated in-app keyboard (no OS keyboard); off = native TextField.
     final inAppKeyboard = ref.watch(settingsProvider).inAppKeyboard;
     final Widget? suffix = _resolving
+        ? const Padding(
+            padding: EdgeInsets.all(12),
+            child: SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          )
+        : null;
+    final Widget? partnerSuffix = _resolvingPartner
         ? const Padding(
             padding: EdgeInsets.all(12),
             child: SizedBox(
@@ -1613,6 +1672,33 @@ class _PlayerSettingsSheetState extends ConsumerState<_PlayerSettingsSheet> {
                           suffixIcon: suffix,
                         ),
                         onSubmitted: _submitCommander,
+                      ),
+                    const SizedBox(height: 12),
+                    if (inAppKeyboard)
+                      TextField(
+                        key: const ValueKey('field-partner'),
+                        controller: _partnerController,
+                        readOnly: true,
+                        decoration: InputDecoration(
+                          labelText: 'Partner / Background',
+                          suffixIcon: partnerSuffix,
+                        ),
+                        onTap: () => _editField(
+                          _partnerController,
+                          'Partner / Background',
+                          _submitPartnerCommander,
+                        ),
+                      )
+                    else
+                      TextField(
+                        key: const ValueKey('field-partner'),
+                        controller: _partnerController,
+                        textInputAction: TextInputAction.done,
+                        decoration: InputDecoration(
+                          labelText: 'Partner / Background',
+                          suffixIcon: partnerSuffix,
+                        ),
+                        onSubmitted: _submitPartnerCommander,
                       ),
                     const SizedBox(height: 16),
                     Row(
