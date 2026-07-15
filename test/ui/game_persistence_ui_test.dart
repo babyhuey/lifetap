@@ -93,4 +93,32 @@ void main() {
     expect(container.read(gameProvider).current.playerCount, 4);
     expect(container.read(gameProvider).current.players.first.life, 40);
   });
+
+  testWidgets(
+    'an unfoldable saved history (referencing a player no NewGame created) '
+    'falls back to the default fresh game instead of crashing',
+    (tester) async {
+      final shared = _InMemoryPersistence()
+        ..stored = const [
+          NewGame(playerCount: 2, startingLife: 20),
+          AdjustCounter(playerId: 5, mode: CounterMode.life, delta: -3),
+        ];
+      final container = ProviderContainer(
+        overrides: [gamePersistenceProvider.overrideWithValue(shared)],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: GameScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(); // async restore resolves (and fails to fold)
+
+      expect(container.read(gameProvider).current.playerCount, 4);
+      expect(container.read(gameProvider).current.players.first.life, 40);
+    },
+  );
 }

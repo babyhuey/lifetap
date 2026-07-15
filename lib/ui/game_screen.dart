@@ -73,7 +73,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   Future<void> _restoreIfAvailable() async {
     final history = await ref.read(gamePersistenceProvider).load();
     if (history == null || !mounted) return;
-    ref.read(gameProvider.notifier).restoreFrom(history);
+    try {
+      ref.read(gameProvider.notifier).restoreFrom(history);
+    } catch (_) {
+      // An unfoldable history (e.g. schema drift, external tampering) — keep
+      // the default freshly-seeded game, same as if load() had returned null.
+    }
   }
 
   @override
