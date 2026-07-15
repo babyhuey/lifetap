@@ -1,0 +1,32 @@
+# Auto-Restore In-Progress Game — Design Spec (2026-07-14)
+
+Persists the current game's event history so the app resumes exactly where it left off after being killed and relaunched, instead of always seeding a fresh 4-player/40-life game. This was an open offer noted in DEV_NOTES.md; the user explicitly asked for it as part of a batch of features, approved for autonomous design (no interactive brainstorming session — decisions below are reasoned defaults, flagged for review at the end).
+
+## Goals
+
+1. Killing and relaunching the app resumes the in-progress game (all player state, history, table statuses) exactly as it was.
+2. Starting a new game (via Settings → Start game) naturally replaces whatever was saved — no separate "clear saved game" UI needed.
+3. A corrupted or unreadable save never crashes the app on launch — falls back to a fresh game, same as today.
+4. No change to `GameNotifier`'s existing synchronous, pure behavior — it stays 100% testable without any I/O, matching its current design.
+
+## Non-goals
+
+- No "multiple saved games" / save slots — one implicit save, same as the app's one implicit in-progress game.
+- No explicit "save now" / "load" UI — this is transparent, matching the user's prior rejection of a formal "saved profiles" feature. Auto-restore is a continuity feature, not a save-management feature.
+
+## Architecture
+
+**Why this needs new plumbing:** `GameNotifier.build()` is synchronous (a plain Riverpod `Notifier`, not `AsyncNotifier`), and every existing call site (`game_screen.dart` has 20+ `ref.watch(gameProvider)`/`ref.read(gameProvider)` usages) assumes synchronous, always-available state. Switching to `AsyncNotifier` to support an async `build()` would ripple through the whole UI layer for a feature that doesn't need it — `SharedPreferences` reads are fast, and a same-frame "restore" after the default seed is imperceptible.
+
+**Serialization (`game/` layer, pure, no I/O).** Each `GameEvent` subclass (`lib/game/game_events.dart`) gains a `Map<String, dynamic> toJson()` method, following the exact style already used for `apply()`/`describe()` — one small method per subclass, hand-written (this codebase has no `json_serializable`/`freezed` dependency and nothing else in it uses codegen, so introducing one for 9 small classes would be disproportionate). A new top-level `GameEvent eventFromJson(Map<String, dynamic> json)` factory switches on a `'type'` string tag to reconstruct the right subclass. This keeps serialization a pure, domain-level concern — no dependency on `SharedPreferences` or `dart:convert`'s encode/decode, just `Map<String, dynamic>` in and out.
+
+**Persistence (`data/` layer, I/O only).** A new `lib/data/game_persistence.dart`, mirroring the existing `lib/data/commander_art.dart` shape exactly: an abstract `GamePersistence` interface (`Future<void> save(List<GameEvent> history)`, `Future<List<GameEvent>?> load()`), a `SharedPreferencesGamePersistence` implementation, and a `gamePersistenceProvider` (`Provider<GamePersistence>`) so tests can override it with a fake — the same pattern `CommanderArtSource`/`commanderArtSourceProvider` already establishes. `save` JSON-encodes `history.map((e) => e.toJson())` under a fixed `SharedPreferences` key. `load` decodes the same way and maps each entry through `eventFromJson`. Both wrap their body in try/catch and fail silently (`save` no-ops, `load` returns `null`) — matching `ScryfallArtSource`'s established "never throws" contract for exactly this class of external-data code, since a launch-time crash from a corrupted save would be far worse than silently discarding it.
+
+**Wiring (`ui/` layer, the integration point — matches how `commanderArtSourceProvider` already bridges `game/` and `data/` without either depending on the other directly).** `GameNotifier` gains one new pure method, `restoreFrom(List<GameEvent> history)`, which sets `state = GameSession(current: _fold(history), history: history)` — reusing the existing private `_fold`. No new imports in `game_notifier.dart`; it still knows nothing about persistence. In `GameScreen.initState()` (`lib/ui/game_screen.dart`, alongside the existing `_enableWakelock()` call): (1) fire an async `ref.read(gamePersistenceProvider).load()`, and if it resolves to a non-null history (with a `mounted` guard, matching the existing pattern in `_submitCommander`), call `ref.read(gameProvider.notifier).restoreFrom(history)`; (2) register `ref.listen(gameProvider, (previous, next) => ref.read(gamePersistenceProvider).save(next.history))` so every subsequent state change — including a fresh `NewGame` from Settings, which naturally overwrites the old save — persists automatically. `ref.listen` doesn't fire for the state current at registration time, so the very first default-seeded game is only persisted once the player makes their first move or starts a new game; if the app is killed before that, relaunching just produces the same default game again, which is an unobservable no-op, not a bug.
+
+## Testing
+
+- `test/game/game_events_json_test.dart` (new): round-trip `toJson`/`eventFromJson` for all 9 event types. Since `GameEvent` subclasses have no `==` override (unchanged by this feature — adding one would be an unrelated, unrequested refactor), verify round-trip correctness by applying both the original and the decoded event to the same sample `GameState` and comparing the resulting `GameState`'s field values (and comparing `describe()` output), not by asserting event equality directly.
+- `test/data/game_persistence_test.dart` (new, mirroring `test/data/commander_art_test.dart`'s structure): save-then-load round-trip preserves an event history; `load()` returns `null` when nothing is saved; `load()` returns `null` (not a thrown exception) on malformed stored JSON.
+- `test/game/game_notifier_test.dart`: one new test for `restoreFrom` — restoring a multi-event history produces the correctly-folded `current` state and the exact `history` list.
+- `test/ui/`: one new widget test (new file `test/ui/game_persistence_ui_test.dart`) proving the end-to-end promise: dispatch a few events against one `ProviderContainer` sharing a fake `GamePersistence`, then build a *second*, independent `GameScreen`/`ProviderContainer` pair against the same fake persistence and confirm it resumes with the prior session's life totals rather than the default fresh game.
