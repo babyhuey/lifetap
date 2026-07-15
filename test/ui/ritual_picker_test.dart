@@ -141,4 +141,26 @@ void main() {
       expect(settingsAfter.onPressed, isNotNull);
     },
   );
+
+  testWidgets('the toolbar Undo button is disabled while the ritual is '
+      'active', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(child: const MaterialApp(home: GameScreen())),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('ritual-icon')));
+    await tester.pump();
+
+    final undoFinder = find.ancestor(
+      of: find.byIcon(Icons.undo),
+      matching: find.byType(IconButton),
+    );
+    expect(tester.widget<IconButton>(undoFinder).onPressed, isNull);
+
+    await tester.tap(find.byKey(const ValueKey('ritual-close')));
+    await tester.pump();
+
+    expect(tester.widget<IconButton>(undoFinder).onPressed, isNotNull);
+  });
 }
