@@ -64,6 +64,17 @@ class _ActivePointer {
   final HoldRepeater hold;
 }
 
+/// Returns the index of the zone in [zones] containing [position], or null if
+/// [position] falls outside every zone. Shared by [PointerRouter]'s internal
+/// gesture tracking and any caller that needs the same lookup without going
+/// through the full gesture state machine (the starting-player ritual).
+int? zoneAt(List<Rect> zones, Offset position) {
+  for (var i = 0; i < zones.length; i++) {
+    if (zones[i].contains(position)) return i;
+  }
+  return null;
+}
+
 /// Pure-Dart per-zone pointer state machine. A pointer belongs to the zone it
 /// landed in for its whole life. Feed it synthesized [down]/[move]/[up] events
 /// and it emits typed [PointerResult]s through [onResult].
@@ -128,13 +139,6 @@ class PointerRouter {
   /// multi-finger tap in the same zone; they must not emit again on up.
   final Set<int> _consumed = {};
 
-  int? _zoneAt(Offset p) {
-    for (var i = 0; i < zones.length; i++) {
-      if (zones[i].contains(p)) return i;
-    }
-    return null;
-  }
-
   /// Seat-horizontal component of a movement/offset [delta] within [zone]: the
   /// vector rotated by −q·90° (q being the zone's quarter-turns) into the seat's
   /// own upright frame, so the seated player's left reads negative and their
@@ -156,7 +160,7 @@ class PointerRouter {
       _horizontalAt(p - zones[zone].center, zone) < 0 ? -1 : 1;
 
   void down(int pointerId, Offset position) {
-    final zone = _zoneAt(position);
+    final zone = zoneAt(zones, position);
     if (zone == null) return; // outside every zone — ignore
     final hold = HoldRepeater(holdThreshold: holdThreshold)..start(clock());
     _active[pointerId] = _ActivePointer(
@@ -322,21 +326,29 @@ class RitualDetector {
 
   double get progress {
     if (zoneCount == 0) return 0;
+    var least = 1.0;
+    for (var z = 0; z < zoneCount; z++) {
+      final p = progressForZone(z);
+      if (p == 0) return 0; // this zone has no held pointer
+      if (p < least) least = p;
+    }
+    return least;
+  }
+
+  /// This zone's own hold progress, 0..1 — unlike [progress] (the minimum
+  /// across every zone), this reflects only [zone]'s own held pointer, so a
+  /// caller can render each zone's hold independently.
+  double progressForZone(int zone) {
     final now = clock();
     final limit = holdDuration.inMicroseconds;
-    var least = limit;
-    for (var z = 0; z < zoneCount; z++) {
-      int? bestHeld;
-      for (final h in _holds.values) {
-        if (h.zone != z) continue;
-        final held = (now - h.since).inMicroseconds;
-        if (bestHeld == null || held > bestHeld) bestHeld = held;
-      }
-      if (bestHeld == null) return 0; // this zone has no held pointer
-      final clamped = bestHeld.clamp(0, limit);
-      if (clamped < least) least = clamped;
+    int? bestHeld;
+    for (final h in _holds.values) {
+      if (h.zone != zone) continue;
+      final held = (now - h.since).inMicroseconds;
+      if (bestHeld == null || held > bestHeld) bestHeld = held;
     }
-    return least / limit;
+    if (bestHeld == null) return 0;
+    return bestHeld.clamp(0, limit) / limit;
   }
 
   /// Recomputes progress and fires [onComplete] exactly once on completion.
