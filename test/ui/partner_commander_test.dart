@@ -65,6 +65,46 @@ void main() {
   });
 
   testWidgets(
+    'setting only a partner, with the primary commander never touched, '
+    'resolves correctly and leaves the primary fields null',
+    (tester) async {
+      final container = ProviderContainer(
+        overrides: [
+          commanderArtSourceProvider.overrideWithValue(_FakeArtSource()),
+        ],
+      );
+      addTearDown(container.dispose);
+      container.read(settingsProvider.notifier).setInAppKeyboard(false);
+      container.read(gameProvider.notifier).newGame(2, 20);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: GameScreen()),
+        ),
+      );
+      await tester.pump();
+
+      final id = container.read(gameProvider).current.players.first.id;
+      await tester.tap(find.byKey(ValueKey('cmdr-me-$id')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('field-partner')),
+        'Kraum',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      final player = container.read(gameProvider).current.player(id);
+      expect(player.partnerCommanderName, 'Kraum');
+      expect(player.partnerArtUrl, 'http://art/Kraum');
+      expect(player.commanderName, isNull);
+      expect(player.artUrl, isNull);
+    },
+  );
+
+  testWidgets(
     'submitting the partner field before the primary commander field still '
     'leaves both resolved independently, regardless of submission order',
     (tester) async {
