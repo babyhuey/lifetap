@@ -121,7 +121,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     if (!_ritualActive || _ritualWinnerPlayerId != null) return;
     if (_ritualDetector!.poll()) {
       _completeRitual();
-    } else if (_ritualDetector!.progress > 0) {
+    } else if (_ritualPointerZones.isNotEmpty) {
+      // At least one zone has a held pointer — its progress ring is
+      // advancing even if other zones haven't joined yet, so repaint. The
+      // aggregate `progress` (min across zones) stays 0 until every zone
+      // has joined, which would freeze already-held rings during a
+      // gradual join.
       setState(() {});
     }
   }
