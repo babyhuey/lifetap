@@ -10,6 +10,7 @@ import 'theme.dart';
 /// screen. Starting life covers the common Commander/60-card formats.
 const List<int> playerCountOptions = [2, 3, 4, 5, 6];
 const List<int> startingLifeOptions = [20, 25, 30, 40, 60];
+const List<int> turnTimerSecondsOptions = [30, 60, 90, 120];
 
 /// App-level gameplay settings, independent of the event-sourced game session
 /// so toggling one never rewrites game history or resets the current match.
@@ -21,6 +22,8 @@ class GameSettings {
     this.inAppKeyboard = true,
     this.hapticFeedback = true,
     this.soundEffects = false,
+    this.turnTimerEnabled = false,
+    this.turnTimerSeconds = 60,
   });
 
   /// When true, commander damage also subtracts life (the default rule).
@@ -40,12 +43,21 @@ class GameSettings {
   /// When true, the same taps also play a short system click/alert sound.
   final bool soundEffects;
 
+  /// When true, the toolbar's End Turn button and a per-turn countdown badge
+  /// are active. A soft reminder only — it never forces anything.
+  final bool turnTimerEnabled;
+
+  /// Seconds per turn once [turnTimerEnabled] is on.
+  final int turnTimerSeconds;
+
   GameSettings copyWith({
     bool? commanderDamageLifeLoss,
     bool? autoKo,
     bool? inAppKeyboard,
     bool? hapticFeedback,
     bool? soundEffects,
+    bool? turnTimerEnabled,
+    int? turnTimerSeconds,
   }) => GameSettings(
     commanderDamageLifeLoss:
         commanderDamageLifeLoss ?? this.commanderDamageLifeLoss,
@@ -53,6 +65,8 @@ class GameSettings {
     inAppKeyboard: inAppKeyboard ?? this.inAppKeyboard,
     hapticFeedback: hapticFeedback ?? this.hapticFeedback,
     soundEffects: soundEffects ?? this.soundEffects,
+    turnTimerEnabled: turnTimerEnabled ?? this.turnTimerEnabled,
+    turnTimerSeconds: turnTimerSeconds ?? this.turnTimerSeconds,
   );
 }
 
@@ -73,6 +87,12 @@ class SettingsNotifier extends Notifier<GameSettings> {
 
   void setSoundEffects(bool value) =>
       state = state.copyWith(soundEffects: value);
+
+  void setTurnTimerEnabled(bool value) =>
+      state = state.copyWith(turnTimerEnabled: value);
+
+  void setTurnTimerSeconds(int value) =>
+      state = state.copyWith(turnTimerSeconds: value);
 }
 
 final settingsProvider = NotifierProvider<SettingsNotifier, GameSettings>(
@@ -244,6 +264,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               label: 'Sound effects',
               value: settings.soundEffects,
               onChanged: ref.read(settingsProvider.notifier).setSoundEffects,
+            ),
+            _ToggleRow(
+              label: 'Turn timer',
+              value: settings.turnTimerEnabled,
+              onChanged: ref
+                  .read(settingsProvider.notifier)
+                  .setTurnTimerEnabled,
+            ),
+            const SizedBox(height: 12),
+            const _RowLabel('Turn timer length'),
+            const SizedBox(height: 10),
+            _ChipRow(
+              options: turnTimerSecondsOptions,
+              selected: settings.turnTimerSeconds,
+              onSelected: ref
+                  .read(settingsProvider.notifier)
+                  .setTurnTimerSeconds,
             ),
             const SizedBox(height: 32),
             const _SectionHeader('Offline'),
