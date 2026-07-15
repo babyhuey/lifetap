@@ -170,6 +170,23 @@ void main() {
       await tester.pump();
 
       final players = container.read(gameProvider).current.players;
+      // A harmless move before the lethal one, so history stays longer than
+      // 1 event after the lethal hit is undone below — this is what makes
+      // the test actually discriminate the state-derived reset (checking
+      // the current alive count) from the old, buggy history-length check
+      // (`history.length <= 1`), which this specific history would have
+      // passed too: [NewGame, harmless, lethal] undoes to [NewGame,
+      // harmless] (length 2, not <= 1), so only a real alive-count check
+      // correctly re-arms the flag here.
+      container
+          .read(gameProvider.notifier)
+          .dispatch(
+            AdjustCounter(
+              playerId: players[1].id,
+              mode: CounterMode.life,
+              delta: -1,
+            ),
+          );
       container
           .read(gameProvider.notifier)
           .dispatch(
