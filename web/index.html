@@ -20,6 +20,16 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Multi-touch MTG life counter for 1-6 players.">
 
+  <!-- The app is always dark. Declaring that (and painting the page dark) stops
+       Safari dark-mode extensions from inverting the already-dark canvas. -->
+  <meta name="color-scheme" content="dark">
+  <style>
+    html, body {
+      color-scheme: dark;
+      background-color: #121212;
+    }
+  </style>
+
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
