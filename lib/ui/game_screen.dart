@@ -47,6 +47,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   final Map<int, int> _ritualPointerZones = {};
   Timer? _ritualDismissTimer;
   bool _gameOverShown = false;
+  int? _activeTurnPlayerId;
+  Duration? _turnDeadline;
 
   @override
   void initState() {
@@ -58,6 +60,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     _holdTimer = Timer.periodic(const Duration(milliseconds: 60), (_) {
       _router.tick();
       _ritualTick();
+      _turnTimerTick();
     });
     _enableWakelock();
     _restoreIfAvailable();
@@ -92,6 +95,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       if (_gameOverShown) return;
       _gameOverShown = true;
       _showGameOverSummary(next.current, alive.single.id);
+    });
+    // Resets turn tracking on a fresh NewGame — checked by history length,
+    // not by re-deriving from current players, since a new game's player
+    // ids can coincidentally overlap with the prior game's (both start at
+    // 0), which would make an "is this id still in the roster" check
+    // unreliable as a reset signal.
+    ref.listenManual(gameProvider, (previous, next) {
+      if (next.history.length <= 1) {
+        _activeTurnPlayerId = null;
+      }
     });
   }
 
@@ -220,6 +233,50 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     }
   }
 
+  void _turnTimerTick() {
+    final settings = ref.read(settingsProvider);
+    if (!settings.turnTimerEnabled) {
+      _activeTurnPlayerId = null;
+      return;
+    }
+    final players = ref.read(gameProvider).current.players;
+    if (players.isEmpty) return;
+    if (_activeTurnPlayerId == null) {
+      _activeTurnPlayerId = players.first.id;
+      _turnDeadline =
+          _router.clock() + Duration(seconds: settings.turnTimerSeconds);
+    }
+    setState(() {});
+  }
+
+  /// Advances to the next player in seating order, wrapping around, and
+  /// resets the countdown. A no-op while the setting is off.
+  void _endTurn() {
+    final settings = ref.read(settingsProvider);
+    if (!settings.turnTimerEnabled) return;
+    final players = ref.read(gameProvider).current.players;
+    if (players.isEmpty) return;
+    final currentIndex = players.indexWhere((p) => p.id == _activeTurnPlayerId);
+    final nextIndex = currentIndex == -1
+        ? 0
+        : (currentIndex + 1) % players.length;
+    setState(() {
+      _activeTurnPlayerId = players[nextIndex].id;
+      _turnDeadline =
+          _router.clock() + Duration(seconds: settings.turnTimerSeconds);
+    });
+  }
+
+  /// Whole seconds left in the active player's turn, clamped at 0 once the
+  /// deadline has passed (never negative — the badge shows 0, not a
+  /// countdown into negative numbers).
+  int _turnSecondsRemaining() {
+    final deadline = _turnDeadline;
+    if (deadline == null) return 0;
+    final remaining = deadline - _router.clock();
+    return remaining.isNegative ? 0 : remaining.inSeconds;
+  }
+
   void _completeRitual() {
     final pointerIds = _ritualPointerZones.keys.toList();
     final winnerPointer = pickWinner(pointerIds, Random().nextInt(1 << 32));
@@ -293,6 +350,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     final session = ref.watch(gameProvider);
     final game = session.current;
     final players = game.players;
+    final settings = ref.watch(settingsProvider);
 
     return Scaffold(
       backgroundColor: LifeTapColors.background,
@@ -442,6 +500,33 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       ),
                     ),
                   ),
+              // The active player's turn-countdown badge, seat-rotated,
+              // positioned below the Monarch/Initiative badges (top: 80 vs.
+              // their top: 48) so the two never overlap if a player holds
+              // both. Ephemeral UI state, not a GameState status — a
+              // sibling condition here rather than merged into
+              // _ZoneStatusBadges.
+              for (var i = 0; i < players.length; i++)
+                if (settings.turnTimerEnabled &&
+                    _activeTurnPlayerId == players[i].id)
+                  Positioned.fromRect(
+                    rect: rects[i],
+                    child: IgnorePointer(
+                      child: RotatedBox(
+                        quarterTurns: turns[i],
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 80),
+                            child: _TurnTimerBadge(
+                              key: const ValueKey('turn-timer-badge'),
+                              secondsRemaining: _turnSecondsRemaining(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               Positioned.fromRect(
                 rect: layout.toolbar,
                 child: _Toolbar(
@@ -458,6 +543,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                   onCoin: _ritualActive ? null : _showCoin,
                   onHistory: _ritualActive ? null : _showHistory,
                   onRitual: _toggleRitual,
+                  onEndTurn: (_ritualActive || !settings.turnTimerEnabled)
+                      ? null
+                      : _endTurn,
                 ),
               ),
               if (_ritualActive)
@@ -2412,6 +2500,7 @@ class _Toolbar extends StatelessWidget {
     required this.onCoin,
     required this.onHistory,
     required this.onRitual,
+    required this.onEndTurn,
   });
 
   final int playerCount;
@@ -2423,6 +2512,7 @@ class _Toolbar extends StatelessWidget {
   final VoidCallback? onCoin;
   final VoidCallback? onHistory;
   final VoidCallback onRitual;
+  final VoidCallback? onEndTurn;
 
   @override
   Widget build(BuildContext context) {
@@ -2486,6 +2576,13 @@ class _Toolbar extends StatelessWidget {
             color: Colors.white,
             onPressed: onRitual,
             icon: const Icon(Icons.shuffle),
+          ),
+          IconButton(
+            key: const ValueKey('end-turn-icon'),
+            tooltip: 'End turn',
+            color: Colors.white,
+            onPressed: onEndTurn,
+            icon: const Icon(Icons.skip_next),
           ),
         ],
       ),
@@ -3319,6 +3416,39 @@ class _RitualWinnerBanner extends StatelessWidget {
           color: LifeTapColors.textPrimary,
           fontWeight: FontWeight.w800,
           fontSize: 20,
+        ),
+      ),
+    );
+  }
+}
+
+/// The active player's turn countdown, styled like [_ZoneStatusBadge] (a
+/// translucent-black, accent-bordered chip) but showing whole seconds
+/// remaining and switching to the warning color once they've run out. A
+/// rounded rect rather than a forced circle, since the digit count varies
+/// (0-120). Purely a visual cue — reaching 0 never blocks or forces anything.
+class _TurnTimerBadge extends StatelessWidget {
+  const _TurnTimerBadge({super.key, required this.secondsRemaining});
+
+  final int secondsRemaining;
+
+  @override
+  Widget build(BuildContext context) {
+    final expired = secondsRemaining <= 0;
+    final color = expired ? LifeTapColors.negative : LifeTapColors.accent;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color, width: 1.5),
+      ),
+      child: Text(
+        '$secondsRemaining',
+        style: TextStyle(
+          color: color,
+          fontSize: 14,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );
