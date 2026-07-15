@@ -69,6 +69,71 @@ void main() {
   );
 
   testWidgets(
+    'a 4-player game only shows the dialog once exactly one player remains — '
+    'not on the first elimination',
+    (tester) async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      container.read(gameProvider.notifier).newGame(4, 20);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: GameScreen()),
+        ),
+      );
+      await tester.pump();
+
+      final players = container.read(gameProvider).current.players;
+
+      // First elimination: 3 players remain alive — the dialog must not
+      // show yet. This is what actually proves the gate is "exactly one
+      // survivor," not "any player died."
+      container
+          .read(gameProvider.notifier)
+          .dispatch(
+            AdjustCounter(
+              playerId: players[0].id,
+              mode: CounterMode.life,
+              delta: -20,
+            ),
+          );
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Game Over'), findsNothing);
+
+      // Second elimination: 2 remain — still not down to one survivor.
+      container
+          .read(gameProvider.notifier)
+          .dispatch(
+            AdjustCounter(
+              playerId: players[1].id,
+              mode: CounterMode.life,
+              delta: -20,
+            ),
+          );
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Game Over'), findsNothing);
+
+      // Third elimination: exactly one survivor — now it shows.
+      container
+          .read(gameProvider.notifier)
+          .dispatch(
+            AdjustCounter(
+              playerId: players[2].id,
+              mode: CounterMode.life,
+              delta: -20,
+            ),
+          );
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Game Over'), findsOneWidget);
+      expect(find.textContaining('${players[3].name} wins!'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'starting a new game after a game-over resets the flag so the next '
     'game-over shows again',
     (tester) async {
