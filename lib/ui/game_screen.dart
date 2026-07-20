@@ -425,7 +425,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       key: ValueKey('settings-${players[i].id}'),
                       tooltip: 'Player settings',
                       color: Colors.white70,
-                      iconSize: 20,
+                      iconSize: 28,
                       icon: const Icon(Icons.settings),
                       onPressed: _ritualActive
                           ? null
@@ -448,7 +448,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       key: ValueKey('counters-${players[i].id}'),
                       tooltip: 'Counters',
                       color: Colors.white70,
-                      iconSize: 20,
+                      iconSize: 28,
                       icon: const Icon(Icons.grid_view),
                       onPressed: _ritualActive
                           ? null
@@ -568,17 +568,14 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                         : () => ref.read(gameProvider.notifier).undo(),
                   ),
                   onDice: _withHaptic(_ritualActive ? null : _showDice),
-                  onCoin: _withHaptic(_ritualActive ? null : _showCoin),
                   onHistory: _withHaptic(_ritualActive ? null : _showHistory),
                   onRitual: () {
                     _controlHaptic(ref);
                     _toggleRitual();
                   },
-                  onEndTurn: _withHaptic(
-                    (_ritualActive || !settings.turnTimerEnabled)
-                        ? null
-                        : _endTurn,
-                  ),
+                  onMenuOpened: () => _controlHaptic(ref),
+                  showEndTurn: settings.turnTimerEnabled,
+                  onEndTurn: _withHaptic(_ritualActive ? null : _endTurn),
                 ),
               ),
               if (_ritualActive)
@@ -607,15 +604,6 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     await showDialog<void>(
       context: context,
       builder: (context) => _DicePopup(rng: _rng),
-    );
-  }
-
-  Future<void> _showCoin() async {
-    final heads = _rng.nextBool();
-    await showDialog<void>(
-      context: context,
-      builder: (context) =>
-          _RollDialog(title: 'Coin flip', value: heads ? 'Heads' : 'Tails'),
     );
   }
 
@@ -1378,27 +1366,33 @@ class _PlayerNameLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      // 3 outer + 5 transparent hit padding keeps the pill visually where it
+      // was (8 from the top) while the tappable box clears 44px tall.
+      padding: const EdgeInsets.only(top: 3),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
-          decoration: BoxDecoration(
-            // Player's color at ~30% over a translucent-black base: a per-seat
-            // tint that stays legible over both near-black zones and art.
-            color: Color.alphaBlend(
-              color.withValues(alpha: 0.30),
-              Colors.black.withValues(alpha: 0.6),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+            decoration: BoxDecoration(
+              // Player's color at ~30% over a translucent-black base: a
+              // per-seat tint that stays legible over both near-black zones
+              // and art.
+              color: Color.alphaBlend(
+                color.withValues(alpha: 0.30),
+                Colors.black.withValues(alpha: 0.6),
+              ),
+              borderRadius: BorderRadius.circular(18),
             ),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Text(
-            name,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
+            child: Text(
+              name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -2254,36 +2248,9 @@ class _KeyCap extends StatelessWidget {
   }
 }
 
-/// Small centered result dialog shared by the d20 and coin-flip buttons.
-class _RollDialog extends StatelessWidget {
-  const _RollDialog({required this.title, required this.value});
-
-  final String title;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: LifeTapColors.surface,
-      title: Text(title),
-      content: Text(
-        value,
-        textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w800),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('OK'),
-        ),
-      ],
-    );
-  }
-}
-
 /// A plain centered summary shown once when exactly one player remains
 /// un-knocked-out: the winner, then every player's final life total.
-/// Table-wide, not seat-rotated — matches [_RollDialog]/[_DicePopup], not the
+/// Table-wide, not seat-rotated — matches [_DicePopup], not the
 /// per-player dialogs.
 class _GameOverDialog extends StatelessWidget {
   const _GameOverDialog({required this.state, required this.winnerId});
@@ -2634,137 +2601,174 @@ class _DiceShapePainter extends CustomPainter {
       oldDelegate.shape != shape;
 }
 
-/// The slim toolbar strip: white icon buttons plus a cyan-ringed badge showing
-/// the current player count. Reset and the badge both open the settings screen.
-/// Sits between the rows for 2/4/6 players and at the bottom for 3/5.
+/// The rare (once-per-game or less) actions living behind the toolbar's
+/// overflow menu; the frequent ones stay as first-class bar buttons.
+enum _ToolbarMenuAction { newGame, ritual, history, dayNight }
+
+/// The slim toolbar strip, kept to the mid-game staples: Undo, Dice (whose
+/// popup includes the coin flip), End turn (only when the turn timer is on),
+/// and a "More" menu holding the labeled once-per-game actions. Sits between
+/// the rows for 2/4/6 players and at the bottom for 3/5.
 class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.playerCount,
     required this.dayNight,
+    required this.showEndTurn,
     required this.onDayNight,
     required this.onSettings,
     required this.onUndo,
     required this.onDice,
-    required this.onCoin,
     required this.onHistory,
     required this.onRitual,
     required this.onEndTurn,
+    required this.onMenuOpened,
   });
 
   final int playerCount;
   final DayNight dayNight;
+  final bool showEndTurn;
   final VoidCallback? onDayNight;
   final VoidCallback? onSettings;
   final VoidCallback? onUndo;
   final VoidCallback? onDice;
-  final VoidCallback? onCoin;
   final VoidCallback? onHistory;
   final VoidCallback onRitual;
   final VoidCallback? onEndTurn;
+  final VoidCallback onMenuOpened;
+
+  /// Bar buttons get a 28px glyph in a 48px box so the target comfortably
+  /// clears Apple's 44pt minimum and the icon reads at arm's length.
+  static const double _glyphSize = 28;
+  static const EdgeInsets _buttonPadding = EdgeInsets.all(10);
+
+  PopupMenuItem<_ToolbarMenuAction> _menuItem(
+    _ToolbarMenuAction action,
+    Widget icon,
+    String label, {
+    Key? key,
+    bool enabled = true,
+  }) {
+    return PopupMenuItem(
+      key: key,
+      value: action,
+      enabled: enabled,
+      child: Row(
+        children: [
+          icon,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final dayNightLabel = switch (dayNight) {
+      DayNight.none => 'Off',
+      DayNight.day => 'Day',
+      DayNight.night => 'Night',
+    };
     return Material(
       color: LifeTapColors.background,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           IconButton(
-            tooltip: 'New game',
-            color: Colors.white,
-            onPressed: onSettings,
-            icon: const Icon(Icons.refresh),
-          ),
-          _PlayerCountBadge(count: playerCount, onTap: onSettings),
-          IconButton(
             tooltip: 'Undo',
             color: Colors.white,
+            iconSize: _glyphSize,
+            padding: _buttonPadding,
             onPressed: onUndo,
             icon: const Icon(Icons.undo),
           ),
           IconButton(
             tooltip: 'Dice',
             color: Colors.white,
+            iconSize: _glyphSize,
+            padding: _buttonPadding,
             onPressed: onDice,
             icon: const Icon(Icons.casino),
           ),
-          IconButton(
-            tooltip: 'Coin flip',
-            color: Colors.white,
-            onPressed: onCoin,
-            icon: const Icon(Icons.monetization_on),
-          ),
-          IconButton(
-            tooltip: 'Day/Night',
-            onPressed: onDayNight,
-            icon: switch (dayNight) {
-              DayNight.none => Icon(
-                Icons.brightness_medium,
-                color: Colors.white.withValues(alpha: 0.35),
-              ),
-              DayNight.day => const Icon(
-                Icons.wb_sunny,
-                color: Color(0xFFFDD835),
-              ),
-              DayNight.night => const Icon(
-                Icons.nightlight_round,
-                color: LifeTapColors.accent,
-              ),
+          if (showEndTurn)
+            IconButton(
+              key: const ValueKey('end-turn-icon'),
+              tooltip: 'End turn',
+              color: Colors.white,
+              iconSize: _glyphSize,
+              padding: _buttonPadding,
+              onPressed: onEndTurn,
+              icon: const Icon(Icons.skip_next),
+            ),
+          PopupMenuButton<_ToolbarMenuAction>(
+            key: const ValueKey('toolbar-menu'),
+            tooltip: 'More',
+            iconSize: _glyphSize,
+            padding: _buttonPadding,
+            color: LifeTapColors.surface,
+            icon: const Icon(Icons.more_horiz, color: Colors.white),
+            onOpened: onMenuOpened,
+            onSelected: (action) {
+              switch (action) {
+                case _ToolbarMenuAction.newGame:
+                  onSettings?.call();
+                case _ToolbarMenuAction.ritual:
+                  onRitual();
+                case _ToolbarMenuAction.history:
+                  onHistory?.call();
+                case _ToolbarMenuAction.dayNight:
+                  onDayNight?.call();
+              }
             },
-          ),
-          IconButton(
-            tooltip: 'History',
-            color: Colors.white,
-            onPressed: onHistory,
-            icon: const Icon(Icons.history),
-          ),
-          IconButton(
-            key: const ValueKey('ritual-icon'),
-            tooltip: 'Pick starting player',
-            color: Colors.white,
-            onPressed: onRitual,
-            icon: const Icon(Icons.shuffle),
-          ),
-          IconButton(
-            key: const ValueKey('end-turn-icon'),
-            tooltip: 'End turn',
-            color: Colors.white,
-            onPressed: onEndTurn,
-            icon: const Icon(Icons.skip_next),
+            itemBuilder: (context) => [
+              _menuItem(
+                _ToolbarMenuAction.newGame,
+                const Icon(Icons.refresh, size: 20, color: Colors.white70),
+                'New game… ($playerCount players)',
+                enabled: onSettings != null,
+              ),
+              _menuItem(
+                _ToolbarMenuAction.ritual,
+                const Icon(Icons.shuffle, size: 20, color: Colors.white70),
+                'Pick starting player',
+                key: const ValueKey('ritual-icon'),
+              ),
+              _menuItem(
+                _ToolbarMenuAction.history,
+                const Icon(Icons.history, size: 20, color: Colors.white70),
+                'History',
+                enabled: onHistory != null,
+              ),
+              _menuItem(
+                _ToolbarMenuAction.dayNight,
+                switch (dayNight) {
+                  DayNight.none => Icon(
+                    Icons.brightness_medium,
+                    size: 20,
+                    color: Colors.white.withValues(alpha: 0.35),
+                  ),
+                  DayNight.day => const Icon(
+                    Icons.wb_sunny,
+                    size: 20,
+                    color: Color(0xFFFDD835),
+                  ),
+                  DayNight.night => const Icon(
+                    Icons.nightlight_round,
+                    size: 20,
+                    color: LifeTapColors.accent,
+                  ),
+                },
+                'Day / Night: $dayNightLabel',
+                enabled: onDayNight != null,
+              ),
+            ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _PlayerCountBadge extends StatelessWidget {
-  const _PlayerCountBadge({required this.count, required this.onTap});
-
-  final int count;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: 'Players',
-      onPressed: onTap,
-      icon: Container(
-        width: 30,
-        height: 30,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: LifeTapColors.accent, width: 2),
-        ),
-        child: Text(
-          '$count',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
       ),
     );
   }
@@ -3177,7 +3181,9 @@ class _CountersPopupState extends ConsumerState<_CountersPopup> {
     return GestureDetector(
       onTap: () => setState(() => _tab = tab),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        // Vertical 12 keeps the whole segment >= 44px tall (Apple's minimum
+        // touch target).
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: selected ? LifeTapColors.accent : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
