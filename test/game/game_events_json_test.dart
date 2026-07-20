@@ -25,12 +25,26 @@ void _expectRoundTrips(GameEvent original) {
   expect(afterRoundTripped.monarchId, afterOriginal.monarchId);
   expect(afterRoundTripped.initiativeId, afterOriginal.initiativeId);
   expect(afterRoundTripped.dayNight, afterOriginal.dayNight);
+  expect(afterRoundTripped.seed, afterOriginal.seed);
   expect(roundTripped.describe(before), original.describe(before));
 }
 
 void main() {
   test('NewGame round-trips', () {
-    _expectRoundTrips(const NewGame(playerCount: 3, startingLife: 30));
+    _expectRoundTrips(
+      const NewGame(playerCount: 3, startingLife: 30, seed: 12345),
+    );
+  });
+
+  test('NewGame from legacy JSON missing the seed field defaults to 0', () {
+    final event = eventFromJson(const {
+      'type': 'NewGame',
+      'playerCount': 2,
+      'startingLife': 20,
+    });
+
+    final state = event.apply(const GameState(players: [], startingLife: 20));
+    expect(state.seed, 0);
   });
 
   test('AdjustCounter round-trips', () {
