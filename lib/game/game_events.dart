@@ -38,10 +38,20 @@ sealed class GameEvent {
 
 /// Starts a fresh game, discarding any prior state.
 class NewGame extends GameEvent {
-  const NewGame({required this.playerCount, required this.startingLife});
+  const NewGame({
+    required this.playerCount,
+    required this.startingLife,
+    this.seed = 0,
+  });
 
   final int playerCount;
   final int startingLife;
+
+  /// Random seed for this game's empty-zone textures (see
+  /// `lib/ui/zone_texture.dart`). Generated once by whoever dispatches this
+  /// event so [apply] stays a pure function of its fields; defaults to 0 for
+  /// games persisted before this field existed.
+  final int seed;
 
   @override
   GameState apply(GameState state) {
@@ -56,6 +66,7 @@ class NewGame extends GameEvent {
           ),
       ],
       startingLife: startingLife,
+      seed: seed,
     );
   }
 
@@ -68,6 +79,7 @@ class NewGame extends GameEvent {
     'type': 'NewGame',
     'playerCount': playerCount,
     'startingLife': startingLife,
+    'seed': seed,
   };
 }
 
@@ -397,6 +409,7 @@ GameEvent eventFromJson(Map<String, dynamic> json) {
     'NewGame' => NewGame(
       playerCount: json['playerCount'] as int,
       startingLife: json['startingLife'] as int,
+      seed: json['seed'] as int? ?? 0,
     ),
     'AdjustCounter' => AdjustCounter(
       playerId: json['playerId'] as int,

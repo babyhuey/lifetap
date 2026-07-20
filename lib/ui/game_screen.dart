@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ import 'life_delta.dart';
 import 'seat_layout.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
+import 'zone_texture.dart';
 
 /// Height reserved for the toolbar strip so player zones never sit under it
 /// (and toolbar touches never route into a zone). For 2/4/6 players the strip
@@ -404,6 +406,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                           child: _PlayerZone(
                             player: players[i],
                             quarterTurns: turns[i],
+                            seed: game.seed,
                           ),
                         ),
                     ],
@@ -830,6 +833,15 @@ bool _knockedOut(PlayerState player, GameSettings settings) {
   return settings.autoKo && player.isDead;
 }
 
+/// The empty-zone color wash's gradient center for [edge] — the midpoint of
+/// that side of the zone rect.
+Alignment _washCenter(WashEdge edge) => switch (edge) {
+  WashEdge.left => Alignment.centerLeft,
+  WashEdge.top => Alignment.topCenter,
+  WashEdge.right => Alignment.centerRight,
+  WashEdge.bottom => Alignment.bottomCenter,
+};
+
 /// Folds [history] into the [GameState] it produces, mirroring
 /// [GameNotifier]'s own private fold. Used by [_GameScreenState._restoreIfAvailable]
 /// to read the about-to-be-restored state ahead of calling
@@ -853,10 +865,18 @@ const List<double> _greyscaleMatrix = <double>[
 ];
 
 class _PlayerZone extends ConsumerWidget {
-  const _PlayerZone({required this.player, required this.quarterTurns});
+  const _PlayerZone({
+    required this.player,
+    required this.quarterTurns,
+    required this.seed,
+  });
 
   final PlayerState player;
   final int quarterTurns;
+
+  /// The game's random seed (see `lib/ui/zone_texture.dart`), used to derive
+  /// this zone's empty-zone texture when it has no commander art.
+  final int seed;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -885,6 +905,49 @@ class _PlayerZone extends ConsumerWidget {
           child: artLayer,
         );
       }
+    }
+
+    // No commander art: a static color wash + film grain replace the flat
+    // near-black fill so the zone isn't quite so bare, without distracting
+    // from the life number. Both layers are cheap statics (a gradient decor
+    // and a once-generated, process-wide cached noise image), so nothing
+    // here repaints per frame.
+    Widget? textureLayer;
+    if (art == null) {
+      final texture = zoneTextureFor(seed, player.id);
+      textureLayer = RepaintBoundary(
+        key: ValueKey('zone-texture-${player.id}'),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: _washCenter(texture.edge),
+                  radius: 0.65,
+                  colors: [
+                    base.withValues(alpha: washAlphaFor(base)),
+                    base.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+            FutureBuilder<ui.Image>(
+              future: grainImage(),
+              builder: (context, snapshot) {
+                final image = snapshot.data;
+                if (image == null) return const SizedBox.shrink();
+                return RawImage(
+                  image: image,
+                  repeat: ImageRepeat.repeat,
+                  alignment: texture.grainAlignment,
+                  fit: BoxFit.none,
+                );
+              },
+            ),
+          ],
+        ),
+      );
     }
 
     return DecoratedBox(
@@ -930,6 +993,7 @@ class _PlayerZone extends ConsumerWidget {
                 ],
               ),
             ),
+          ?textureLayer,
           // Knocked out: a dark overlay dims the whole zone (over the art/color
           // background, under the seat-rotated KO mark) so a dead seat reads out.
           if (ko) const ColoredBox(color: Color(0x8C000000)),

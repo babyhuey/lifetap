@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'game_events.dart';
@@ -20,14 +22,25 @@ class GameNotifier extends Notifier<GameSession> {
 
   @override
   GameSession build() {
-    const seed = NewGame(playerCount: 4, startingLife: 40);
-    return GameSession(current: seed.apply(_empty), history: const [seed]);
+    final event = NewGame(
+      playerCount: 4,
+      startingLife: 40,
+      seed: Random().nextInt(1 << 31),
+    );
+    return GameSession(current: event.apply(_empty), history: [event]);
   }
 
-  /// Starts a fresh game, replacing all history with a single [NewGame].
+  /// Starts a fresh game, replacing all history with a single [NewGame]. Its
+  /// seed is randomized here (rather than inside [NewGame.apply]) so the
+  /// event itself stays a pure function of its fields and replaying history
+  /// deterministically reproduces the same state.
   void newGame(int count, int startingLife) {
-    final seed = NewGame(playerCount: count, startingLife: startingLife);
-    state = GameSession(current: seed.apply(_empty), history: [seed]);
+    final event = NewGame(
+      playerCount: count,
+      startingLife: startingLife,
+      seed: Random().nextInt(1 << 31),
+    );
+    state = GameSession(current: event.apply(_empty), history: [event]);
   }
 
   /// Replaces all state with [history], folded exactly like any other

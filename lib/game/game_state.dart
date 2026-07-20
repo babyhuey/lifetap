@@ -116,6 +116,7 @@ class GameState {
     this.monarchId,
     this.initiativeId,
     this.dayNight = DayNight.none,
+    this.seed = 0,
   });
 
   final List<PlayerState> players;
@@ -130,6 +131,11 @@ class GameState {
   /// Table-wide day/night state.
   final DayNight dayNight;
 
+  /// Random seed set by the [NewGame] that started this game; empty-zone
+  /// textures derive from it so a restored game looks the same as before it
+  /// closed. Defaults to 0 for games persisted before this field existed.
+  final int seed;
+
   int get playerCount => players.length;
 
   PlayerState player(int id) => players.firstWhere((p) => p.id == id);
@@ -140,6 +146,7 @@ class GameState {
     Object? monarchId = _unset,
     Object? initiativeId = _unset,
     DayNight? dayNight,
+    int? seed,
   }) {
     return GameState(
       players: players ?? this.players,
@@ -151,6 +158,7 @@ class GameState {
           ? this.initiativeId
           : initiativeId as int?,
       dayNight: dayNight ?? this.dayNight,
+      seed: seed ?? this.seed,
     );
   }
 
