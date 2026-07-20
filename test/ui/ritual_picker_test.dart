@@ -13,6 +13,15 @@ const _zoneCenters = [
   Offset(600, 466),
 ];
 
+/// Starts the ritual through the toolbar's overflow menu, where the
+/// pick-starting-player entry lives.
+Future<void> _startRitual(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('toolbar-menu')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const ValueKey('ritual-icon')));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets(
     'holding a finger in every zone for 1.5s announces a winner and leaves '
@@ -28,8 +37,7 @@ void main() {
 
       expect(find.text('40'), findsNWidgets(4));
 
-      await tester.tap(find.byKey(const ValueKey('ritual-icon')));
-      await tester.pump();
+      await _startRitual(tester);
       expect(find.byKey(const ValueKey('ritual-overlay')), findsOneWidget);
 
       final gestures = <TestGesture>[];
@@ -74,8 +82,7 @@ void main() {
       );
       await tester.pump();
 
-      await tester.tap(find.byKey(const ValueKey('ritual-icon')));
-      await tester.pump();
+      await _startRitual(tester);
 
       final gestures = <TestGesture>[];
       for (var i = 0; i < _zoneCenters.length; i++) {
@@ -120,8 +127,7 @@ void main() {
 
       final id = container.read(gameProvider).current.players.first.id;
 
-      await tester.tap(find.byKey(const ValueKey('ritual-icon')));
-      await tester.pump();
+      await _startRitual(tester);
 
       final settingsButton = tester.widget<IconButton>(
         find.byKey(ValueKey('settings-$id')),
@@ -149,8 +155,7 @@ void main() {
     );
     await tester.pump();
 
-    await tester.tap(find.byKey(const ValueKey('ritual-icon')));
-    await tester.pump();
+    await _startRitual(tester);
 
     final undoFinder = find.ancestor(
       of: find.byIcon(Icons.undo),

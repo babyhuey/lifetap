@@ -119,8 +119,10 @@ void main() {
         );
     await tester.pump();
 
-    // Open the history sheet from the toolbar.
-    await tester.tap(find.byIcon(Icons.history));
+    // Open the history sheet from the toolbar's overflow menu.
+    await tester.tap(find.byKey(const ValueKey('toolbar-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('History'));
     await tester.pumpAndSettle();
 
     // The Treasure row carries a signed delta chip and the resulting value,
