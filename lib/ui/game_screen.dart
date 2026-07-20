@@ -199,6 +199,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     }
   }
 
+  /// Wraps a button callback so the press also fires the settings-gated
+  /// haptic tick; null (disabled) stays null so the button keeps its
+  /// disabled state.
+  VoidCallback? _withHaptic(VoidCallback? action) => action == null
+      ? null
+      : () {
+          _controlHaptic(ref);
+          action();
+        };
+
   void _toggleRitual() {
     if (_ritualActive) {
       _closeRitual();
@@ -546,20 +556,29 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                 child: _Toolbar(
                   playerCount: players.length,
                   dayNight: game.dayNight,
-                  onDayNight: _ritualActive
-                      ? null
-                      : () => ref.read(gameProvider.notifier).cycleDayNight(),
-                  onSettings: _ritualActive ? null : _openSettings,
-                  onUndo: _ritualActive
-                      ? null
-                      : () => ref.read(gameProvider.notifier).undo(),
-                  onDice: _ritualActive ? null : _showDice,
-                  onCoin: _ritualActive ? null : _showCoin,
-                  onHistory: _ritualActive ? null : _showHistory,
-                  onRitual: _toggleRitual,
-                  onEndTurn: (_ritualActive || !settings.turnTimerEnabled)
-                      ? null
-                      : _endTurn,
+                  onDayNight: _withHaptic(
+                    _ritualActive
+                        ? null
+                        : () => ref.read(gameProvider.notifier).cycleDayNight(),
+                  ),
+                  onSettings: _withHaptic(_ritualActive ? null : _openSettings),
+                  onUndo: _withHaptic(
+                    _ritualActive
+                        ? null
+                        : () => ref.read(gameProvider.notifier).undo(),
+                  ),
+                  onDice: _withHaptic(_ritualActive ? null : _showDice),
+                  onCoin: _withHaptic(_ritualActive ? null : _showCoin),
+                  onHistory: _withHaptic(_ritualActive ? null : _showHistory),
+                  onRitual: () {
+                    _controlHaptic(ref);
+                    _toggleRitual();
+                  },
+                  onEndTurn: _withHaptic(
+                    (_ritualActive || !settings.turnTimerEnabled)
+                        ? null
+                        : _endTurn,
+                  ),
                 ),
               ),
               if (_ritualActive)
@@ -800,8 +819,21 @@ List<Rect> _zoneRects(int count, Size size) {
 }
 
 /// Side length and inter-cell gap of a commander-damage grid cell.
-const double _cmdrCellSize = 40;
+const double _cmdrCellSize = 56;
 const double _cmdrCellGap = 4;
+
+/// Settings-gated haptic tick for pressing a discrete control (toolbar icon,
+/// counters-popup adjuster). Same guard rationale as
+/// [_GameScreenState._playFeedback]: the platform channel may be missing in
+/// tests or on some desktops, and a failure here must never surface.
+Future<void> _controlHaptic(WidgetRef ref) async {
+  if (!ref.read(settingsProvider).hapticFeedback) return;
+  try {
+    await HapticFeedback.selectionClick();
+  } catch (_) {
+    // No-op on platforms/environments without the plugin.
+  }
+}
 
 /// True when Auto-KO is on AND the player is dead (see [PlayerState.isDead]) —
 /// used only for the knocked-out visual, never for game logic. Lethal commander
@@ -1307,7 +1339,7 @@ class _CommanderDamageSquare extends StatelessWidget {
                       value == null ? (label ?? '') : '$value',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: value == null ? 12 : 16,
+                        fontSize: value == null ? 14 : 20,
                         fontWeight: FontWeight.w800,
                         shadows: const [
                           Shadow(
@@ -3028,6 +3060,7 @@ class _CountersPopupState extends ConsumerState<_CountersPopup> {
   _CounterTab _tab = _CounterTab.counters;
 
   void _bump(_CounterTypeDef type, int delta) {
+    _controlHaptic(ref);
     final notifier = ref.read(gameProvider.notifier);
     final mode = type.mode;
     if (mode != null) {
